@@ -76,7 +76,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
 		("Do you want to enter again?", "האם ברצונך להיכנס שוב?"),
 		("Connection Error", "שגיאת חיבור"),
 		("Error", "שגיאה"),
-		("Reset by the peer", "איפוס על ידי העמית"),
+		("Connection lost", "איפוס על ידי העמית"),
 		("Connecting...", "מתחבר..."),
 		("Connection in progress. Please wait.", "חיבור בתהליך. אנא המתן."),
 		("Please try 1 minute later", "אנא נסה שוב אחרי דקה"),

@@ -8,13 +8,13 @@ class Install: Reactor.Component {
     function render() {
         return <div .content>
             <div style="font-size: 2em;">{translate('Installation')}</div>
-            <div style="margin: 2em 0;">{translate('Installation Path')} {": "}<input|text disabled value={view.install_path()} #path_input />
+            <div style="margin: 2em 0;">{translate('Installation Path')} {": "}</div>
+			<div style="margin: 2em 0;"><input|text disabled style='width:350px; height:34px; font-size: 16px;' value={view.install_path()} #path_input />
             <button .button .outline #path style="margin-left: 1em" title={translate('Change Path')}>{translate('Change Path')}</button>
             </div>
             <div><button|checkbox #startmenu checked>{translate('Create start menu shortcuts')}</button></div>
             <div><button|checkbox #desktopicon checked>{translate('Create desktop icon')}</button></div>
-            <div #agreement .link style="margin-top: 2em;">{translate('End-user license agreement')}</div>
-            <div>{translate('agreement_tip')}</div>
+            <div #privacypolicy .link style="margin-top: 2em;">{translate('Privacy Policy')}</div>
             <div style="height: 1px; background: gray; margin-top: 1em" />
             <div style="text-align: right;">
                 <progress style={"color:" + color} style="display: none" /> 
@@ -46,7 +46,7 @@ class Install: Reactor.Component {
         }
     }
 
-    event click $(#agreement) {
+    event click $(#privacypolicy) {
         view.open_url("https://www.hoptodesk.com/privacy");
     }
 

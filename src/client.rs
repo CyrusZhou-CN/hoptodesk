@@ -36,7 +36,7 @@ use hbb_common::{
     anyhow::{anyhow, Context},
     bail,
     config::{
-    	Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution, CONNECT_TIMEOUT,
+    	self, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution, CONNECT_TIMEOUT,
     	RENDEZVOUS_TIMEOUT,
     },
     get_version_number, log,
@@ -345,6 +345,9 @@ impl Client {
         String,
         String,
     )> {
+        if config::is_incoming_only() {
+            bail!("Incoming only mode");
+        }
         match Self::get_peer_info(peer_id).await {
             Ok((peer, sender)) => {
                 let (mut conn, relay, direct) =

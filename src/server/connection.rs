@@ -66,7 +66,6 @@ use system_shutdown;
 use crate::virtual_display_manager;
 #[cfg(not(any(target_os = "ios")))]
 use std::collections::HashSet;
-
 pub type Sender = mpsc::UnboundedSender<(Instant, Arc<Message>)>;
 
 lazy_static::lazy_static! {
@@ -238,6 +237,10 @@ pub struct Connection {
     file_remove_log_control: FileRemoveLogControl,
     #[cfg(feature = "gpucodec")]
     supported_encoding_flag: (bool, Option<bool>),
+    services_subed: bool,
+    delayed_read_dir: Option<(String, bool)>,
+    #[cfg(target_os = "macos")]
+    retina: Retina,    
     security_numbers: String,
     avatar_image: String,
 }
@@ -390,6 +393,10 @@ impl Connection {
             file_remove_log_control: FileRemoveLogControl::new(id),
             #[cfg(feature = "gpucodec")]
             supported_encoding_flag: (false, None),
+            services_subed: false,
+            delayed_read_dir: None,
+            #[cfg(target_os = "macos")]
+            retina: Retina::default(),
         };
         let addr = hbb_common::try_into_v4(addr);
         if !conn.on_open(addr).await {
@@ -594,7 +601,9 @@ impl Connection {
                                         break;
                                     }
                                     if conn.port_forward_socket.is_some() && conn.authorized {
-                                        break;
+                                        if conn.last_test_delay.is_none() {
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -642,7 +651,8 @@ impl Connection {
                 },
                 Some((instant, value)) = rx.recv() => {
                     let latency = instant.elapsed().as_millis() as i64;
-                    let msg: &Message = &value;
+                    #[allow(unused_mut)]
+                    let mut msg = value;
 
                     if latency > 1000 {
                         match &msg.union {
@@ -664,11 +674,20 @@ impl Connection {
                                 _ => {},
                             }
                         }
-                        Some(message::Union::PeerInfo(..)) => {
+                        Some(message::Union::PeerInfo(_pi)) => {
                             conn.refresh_video_display(None);
+                            #[cfg(target_os = "macos")]
+                            conn.retina.set_displays(&_pi.displays);
+                        }
+                        #[cfg(target_os = "macos")]
+                        Some(message::Union::CursorPosition(pos)) => {
+                            if let Some(new_msg) = conn.retina.on_cursor_pos(&pos, conn.display_idx) {
+                                msg = Arc::new(new_msg);
+                            }
                         }
                         _ => {}
                     }
+                    let msg: &Message = &msg;
                     if let Err(err) = conn.stream.send(msg).await {
                         conn.on_close(&err.to_string(), false).await;
                         break;
@@ -693,18 +712,18 @@ impl Connection {
                         conn.on_close("Timeout", true).await;
                         break;
                     }
-                    let mut qos = video_service::VIDEO_QOS.lock().unwrap();
-                    if conn.last_test_delay.is_none() {
+                    // The control end will jump out of the loop after receiving LoginResponse and will not reply to the TestDelay
+                    if conn.last_test_delay.is_none() && !(conn.port_forward_socket.is_some() && conn.authorized) {
                         conn.last_test_delay = Some(Instant::now());
                         let mut msg_out = Message::new();
                         msg_out.set_test_delay(TestDelay{
                             last_delay: conn.network_delay,
-                            target_bitrate: qos.bitrate(),
+                            target_bitrate: video_service::VIDEO_QOS.lock().unwrap().bitrate(),
                             ..Default::default()
                         });
-                        conn.inner.send(msg_out.into());
+                        conn.send(msg_out.into()).await;
                     }
-                    qos.user_delay_response_elapsed(conn.inner.id(), conn.delay_response_instant.elapsed().as_millis());
+                    video_service::VIDEO_QOS.lock().unwrap().user_delay_response_elapsed(conn.inner.id(), conn.delay_response_instant.elapsed().as_millis());
                 }
             }
         }
@@ -851,6 +870,7 @@ impl Connection {
         if let Some(mut forward) = self.port_forward_socket.take() {
             log::info!("Running port forwarding loop");
             self.stream.set_raw();
+            //let mut hbbs_rx = crate::hbbs_http::sync::signal_receiver();
             loop {
                 tokio::select! {
                                     Some(data) = rx_from_cm.recv() => {
@@ -921,7 +941,6 @@ impl Connection {
             true
         }
     }
-
 /*
     async fn check_whitelist(&mut self, addr: &SocketAddr) -> bool {
         let whitelist: Vec<String> = Config::get_option("whitelist")
@@ -1067,10 +1086,11 @@ impl Connection {
         if self.authorized {
             return;
         }
-        if self.require_2fa.is_some() && !self.is_recent_session(true) {
+        if self.require_2fa.is_some() && !self.is_recent_session(true) && !self.from_switch {
             self.send_login_error(crate::client::REQUIRE_2FA).await;
             return;
         }
+        self.authorized = true;
         let (_conn_type, auth_conn_type) = if self.file_transfer.is_some() {
             (1, AuthConnType::FileTransfer)
         } else if self.port_forward_socket.is_some() {
@@ -1207,7 +1227,7 @@ impl Connection {
                 username = "".to_owned();
             }
         }
-        self.authorized = true;
+
         #[cfg(all(feature = "flutter", feature = "plugin_framework"))]
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         PLUGIN_BLOCK_INPUT_TXS
@@ -1224,6 +1244,10 @@ impl Connection {
         .into();
 
         let mut sub_service = false;
+        #[allow(unused_mut)]
+        let mut wait_session_id_confirm = false;
+        #[cfg(windows)]
+        self.handle_windows_specific_session(&mut pi, &mut wait_session_id_confirm);
         if self.file_transfer.is_some() {
             res.set_peer_info(pi);
         } else {
@@ -1255,7 +1279,11 @@ impl Connection {
                 Ok(displays) => {
                     // For compatibility with old versions, we need to send the displays to the peer.
                     // But the displays may be updated later, before creating the video capturer.
-                    pi.displays = displays.clone();
+                    #[cfg(target_os = "macos")]
+                    {
+                        self.retina.set_displays(&displays);
+                    }
+                    pi.displays = displays;
                     pi.current_display = self.display_idx as _;
                     res.set_peer_info(pi);
                     sub_service = true;
@@ -1283,8 +1311,22 @@ impl Connection {
             } else {
                 ""
             };
-            self.read_dir(dir, show_hidden);
+            if !wait_session_id_confirm {
+                self.read_dir(dir, show_hidden);
+            } else {
+                self.delayed_read_dir = Some((dir.to_owned(), show_hidden));
+            }
         } else if sub_service {
+            if !wait_session_id_confirm {
+                self.try_sub_services();
+            }
+        }
+    }
+
+    fn try_sub_services(&mut self) {
+        let is_remote = self.file_transfer.is_none() && self.port_forward_socket.is_none();
+        if is_remote && !self.services_subed {
+            self.services_subed = true;
             if let Some(s) = self.server.upgrade() {
                 let mut noperms = Vec::new();
                 if !self.peer_keyboard_enabled() && !self.show_remote_cursor {
@@ -1309,6 +1351,33 @@ impl Connection {
         }
     }
 
+    #[cfg(windows)]
+    fn handle_windows_specific_session(
+        &mut self,
+        pi: &mut PeerInfo,
+        wait_session_id_confirm: &mut bool,
+    ) {
+        let sessions = crate::platform::get_available_sessions(true);
+        if let Some(current_sid) = crate::platform::get_current_process_session_id() {
+            if crate::platform::is_installed()
+                && crate::platform::is_share_rdp()
+                && raii::AuthedConnID::remote_and_file_conn_count() == 1
+                && sessions.len() > 1
+                && sessions.iter().any(|e| e.sid == current_sid)
+                && (get_version_number(&self.lr.version) > get_version_number("1.2.4")
+                    || self.lr.option.support_windows_specific_session == BoolOption::Yes.into())
+            {
+                pi.windows_sessions = Some(WindowsSessions {
+                    sessions,
+                    current_sid,
+                    ..Default::default()
+                })
+                .into();
+                *wait_session_id_confirm = true;
+            }
+        }
+    }
+    
     fn on_remote_authorized(&self) {
         self.update_codec_on_login();
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1767,6 +1836,12 @@ impl Connection {
                         self.update_failure(failure, true, 1);
                         self.require_2fa.take();
                         self.send_logon_response().await;
+                        self.try_start_cm(
+                            self.lr.my_id.to_owned(),
+                            self.lr.my_name.to_owned(),
+                            self.lr.avatar_image.clone(),
+                            self.authorized,
+                        );
                         let session = SESSIONS
                             .lock()
                             .unwrap()
@@ -1827,8 +1902,13 @@ impl Connection {
                     if let Some((_instant, uuid_old)) = uuid_old {
                         if uuid == uuid_old {
                             self.from_switch = true;
-                            self.try_start_cm(lr.my_id.clone(), lr.my_name.clone(), lr.avatar_image.clone(), true);
                             self.send_logon_response().await;
+                            self.try_start_cm(
+                                lr.my_id.clone(),
+                                lr.my_name.clone(),
+                                lr.avatar_image.clone(),
+                                self.authorized,
+                            );
                             #[cfg(not(any(target_os = "android", target_os = "ios")))]
                             self.try_start_cm_ipc();
                         }
@@ -1836,8 +1916,12 @@ impl Connection {
                 }
             }
         } else if self.authorized {
+            if self.port_forward_socket.is_some() {
+                return true;
+            }
             match msg.union {
-                Some(message::Union::MouseEvent(me)) => {
+                #[allow(unused_mut)]
+                Some(message::Union::MouseEvent(mut me)) => {
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     if let Err(e) = call_main_service_pointer_input("mouse", me.mask, me.x, me.y) {
                         log::debug!("call_main_service_pointer_input fail:{}", e);
@@ -1849,6 +1933,8 @@ impl Connection {
                         } else {
                             MOUSE_MOVE_TIME.store(get_time(), Ordering::SeqCst);
                         }
+                        #[cfg(target_os = "macos")]
+                        self.retina.on_mouse_event(&mut me, self.display_idx);
                         self.input_mouse(me, self.inner.id());
                     }
                     self.update_auto_disconnect_timer();
@@ -2013,6 +2099,12 @@ impl Connection {
                 }
                 Some(message::Union::FileAction(fa)) => {
                     if self.file_transfer.is_some() {
+                        if self.delayed_read_dir.is_some() {
+                            if let Some(file_action::Union::ReadDir(rd)) = fa.union {
+                                self.delayed_read_dir = Some((rd.path, rd.include_hidden));
+                            }
+                            return true;
+                        }
                         match fa.union {
                             Some(file_action::Union::ReadDir(rd)) => {
                                 self.read_dir(&rd.path, rd.include_hidden);
@@ -2304,6 +2396,33 @@ impl Connection {
                         .lock()
                         .unwrap()
                         .user_record(self.inner.id(), status),
+                    #[cfg(windows)]
+                    Some(misc::Union::SelectedSid(sid)) => {
+                        if let Some(current_process_sid) =
+                            crate::platform::get_current_process_session_id()
+                        {
+                            let sessions = crate::platform::get_available_sessions(false);
+                            if crate::platform::is_installed()
+                                && crate::platform::is_share_rdp()
+                                && raii::AuthedConnID::remote_and_file_conn_count() == 1
+                                && sessions.len() > 1
+                                && current_process_sid != sid
+                                && sessions.iter().any(|e| e.sid == sid)
+                            {
+                                std::thread::spawn(move || {
+                                    let _ = ipc::connect_to_user_session(Some(sid));
+                                });
+                                return false;
+                            }
+                            if self.file_transfer.is_some() {
+                                if let Some((dir, show_hidden)) = self.delayed_read_dir.take() {
+                                    self.read_dir(&dir, show_hidden);
+                                }
+                            } else {
+                                self.try_sub_services();
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Some(message::Union::AudioFrame(frame)) => {
@@ -3483,7 +3602,60 @@ extern "C" fn connection_shutdown_hook() {
         *WALLPAPER_REMOVER.lock().unwrap() = None;
     }
 }
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default)]
+struct Retina {
+    displays: Vec<DisplayInfo>,
+}
+
+#[cfg(target_os = "macos")]
+impl Retina {
+    #[inline]
+    fn set_displays(&mut self, displays: &Vec<DisplayInfo>) {
+        self.displays = displays.clone();
+    }
+
+    #[inline]
+    fn on_mouse_event(&mut self, e: &mut MouseEvent, current: usize) {
+        let Some(d) = self.displays.get(current) else {
+            return;
+        };
+        let s = d.scale;
+        if s > 1.0 && e.x >= d.x && e.y >= d.y && e.x < d.x + d.width && e.y < d.y + d.height {
+            e.x = d.x + ((e.x - d.x) as f64 / s) as i32;
+            e.y = d.y + ((e.y - d.y) as f64 / s) as i32;
+        }
+    }
+
+    #[inline]
+    fn on_cursor_pos(&mut self, pos: &CursorPosition, current: usize) -> Option<Message> {
+        let Some(d) = self.displays.get(current) else {
+            return None;
+        };
+        let s = d.scale;
+        if s > 1.0
+            && pos.x >= d.x
+            && pos.y >= d.y
+            && (pos.x - d.x) as f64 * s < d.width as f64
+            && (pos.y - d.y) as f64 * s < d.height as f64
+        {
+            let mut pos = pos.clone();
+            pos.x = d.x + ((pos.x - d.x) as f64 * s) as i32;
+            pos.y = d.y + ((pos.y - d.y) as f64 * s) as i32;
+            let mut msg = Message::new();
+            msg.set_cursor_position(pos);
+            return Some(msg);
+        }
+        None
+    }
+}
+
 mod raii {
+    // CONN_COUNT: remote connection count in fact
+    // ALIVE_CONNS: all connections, including unauthorized connections
+    // AUTHED_CONNS: all authorized connections
+    
     use super::*;
     pub struct ConnectionID(i32);
 
@@ -3498,18 +3670,6 @@ mod raii {
         fn drop(&mut self) {
             let mut active_conns_lock = ALIVE_CONNS.lock().unwrap();
             active_conns_lock.retain(|&c| c != self.0);
-            /*#[cfg(not(any(target_os = "android", target_os = "ios")))]
-            if active_conns_lock.is_empty() {
-                display_service::reset_resolutions();
-            }
-            #[cfg(all(windows, feature = "virtual_display_driver"))]
-            if active_conns_lock.is_empty() {
-                display_service::try_plug_out_virtual_display();
-            }
-            #[cfg(all(windows))]
-            if active_conns_lock.is_empty() {
-                crate::privacy_win_mag::stop();
-            }*/
             video_service::VIDEO_QOS
                 .lock()
                 .unwrap()
@@ -3544,6 +3704,15 @@ mod raii {
                 .unwrap()
                 .send((conn_count, remote_count)));
         }
+
+        pub fn remote_and_file_conn_count() -> usize {
+            AUTHED_CONNS
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|c| c.1 == AuthConnType::Remote || c.1 == AuthConnType::FileTransfer)
+                .count()
+        }
     }
 
     impl Drop for AuthedConnID {
@@ -3570,5 +3739,42 @@ mod raii {
             }
             Self::check_wake_lock();
         }
+    }
+}
+
+mod test {
+    #[allow(unused)]
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retina() {
+        let mut retina = Retina {
+            displays: vec![DisplayInfo {
+                x: 10,
+                y: 10,
+                width: 1000,
+                height: 1000,
+                scale: 2.0,
+                ..Default::default()
+            }],
+        };
+        let mut mouse: MouseEvent = MouseEvent {
+            x: 510,
+            y: 510,
+            ..Default::default()
+        };
+        retina.on_mouse_event(&mut mouse, 0);
+        assert_eq!(mouse.x, 260);
+        assert_eq!(mouse.y, 260);
+        let pos = CursorPosition {
+            x: 260,
+            y: 260,
+            ..Default::default()
+        };
+        let msg = retina.on_cursor_pos(&pos, 0).unwrap();
+        let pos = msg.cursor_position();
+        assert_eq!(pos.x, 510);
+        assert_eq!(pos.y, 510);
     }
 }

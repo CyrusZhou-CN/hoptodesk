@@ -1,11 +1,10 @@
 #[cfg(not(debug_assertions))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::platform::breakdown_callback;
-use hbb_common::log;
 #[cfg(not(debug_assertions))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::platform::register_breakdown_handler;
-
+use hbb_common::{config, log};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::fs;
 	
@@ -101,7 +100,7 @@ pub fn core_main() -> Option<Vec<String>> {
         return core_main_invoke_new_connection(std::env::args());
     }
     let click_setup = cfg!(windows) && args.is_empty() && crate::common::is_setup(&arg_exe);
-    if click_setup {
+    if click_setup && !config::is_disable_installation() {
         args.push("--install".to_owned());
         flutter_args.push("--install".to_string());
     }
@@ -313,7 +312,6 @@ pub fn core_main() -> Option<Vec<String>> {
 
 				use std::process::Command;
 				std::thread::sleep(std::time::Duration::from_secs(5));
-				let status = Command::new(lastpath.clone()).status().expect("Failed to execute command");
 			}
 
             std::process::exit(0);

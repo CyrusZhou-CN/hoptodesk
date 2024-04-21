@@ -328,9 +328,6 @@ class MyIdMenu: Reactor.Component {
 
 
 
-
-
-
     
     
 	event keypress $(svg#menu) (evt)
@@ -386,7 +383,6 @@ class MyIdMenu: Reactor.Component {
     }
 
     function showGen2FA() {
-
         var me = this;
         var has_valid_2fa = handler.has_valid_2fa();
         if (has_valid_2fa) {

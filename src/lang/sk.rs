@@ -457,8 +457,6 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Resolution", "Rozlíšenie"),
         ("No transfers in progress", "Žiadne prebiehajúce presuny"),
         ("Set one-time password length", "Nastaviť dĺžku jednorazového hesla"),
-        ("install_cert_tip", "Inštalácia certifikátu HopToDesk"),
-        ("confirm_install_cert_tip", "Ide o testovací certifikát HopToDesk, ktorému možno dôverovať. Certifikát sa v prípade potreby použije na dôveryhodnosť a inštaláciu ovládačov HopToDesk."),
         ("RDP Settings", "Nastavenia RDP"),
         ("Sort by", "Usporiadať podľa"),
         ("New Connection", "Nové pripojenie"),

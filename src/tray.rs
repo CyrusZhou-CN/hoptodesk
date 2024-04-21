@@ -3,10 +3,7 @@ use crate::client::translate;
 use crate::ipc::Data;
 #[cfg(windows)]
 use hbb_common::tokio;
-use hbb_common::{
-    config::{Config},
-    allow_err, log
-};
+use hbb_common::{allow_err, log};
 use std::sync::{Arc, Mutex};
 #[cfg(windows)]
 use std::time::Duration;

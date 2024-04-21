@@ -105,6 +105,7 @@ fn main() {
 	
 		let dll_bytes = get_dll_bytes();
 		let dll_path = env::temp_dir().join("sciter.dll");
+		
 		let expected_size = if cfg!(target_arch = "x86") {
 			6_036_992
 		} else if cfg!(target_arch = "x86_64") {

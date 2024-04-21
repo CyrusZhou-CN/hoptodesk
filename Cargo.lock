@@ -254,7 +254,7 @@ name = "arboard"
 version = "3.3.1"
 source = "git+https://github.com/fufesou/arboard?branch=feat/x11_set_conn_timeout#956b5f8693b4fc7fddd7b8cafbe1111a892b34b1"
 dependencies = [
- "clipboard-win",
+ "clipboard-win 5.1.0",
  "core-graphics 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "image",
  "log",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "hoptodesk"
-version = "1.41.8"
+version = "1.41.9"
 dependencies = [
  "android-wakelock",
  "android_logger",
@@ -5727,12 +5727,14 @@ dependencies = [
 
 [[package]]
 name = "runas"
-version = "1.0.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed87390fefd18965ff20baae5aeb9913bcf82d2b59dc04c0f6d8f17f7be56ff2"
+checksum = "b96d6b6c505282b007a9b009f2aa38b2fd0359b81a0430ceacc60f69ade4c6a0"
 dependencies = [
- "cc",
+ "libc",
+ "security-framework-sys",
  "which",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

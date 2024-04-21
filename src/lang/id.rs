@@ -458,8 +458,6 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Resolution", "Resolusi"),
         ("No transfers in progress", "Tidak ada proses transfer data"),
         ("Set one-time password length", "Atur panjang kata sandi sekali pakai"),
-        ("install_cert_tip", "Install sertifikat HopToDesk"),
-        ("confirm_install_cert_tip", "Ini adalah sertifikat pengujian HopToDesk, yang dapat dipercaya. Sertifikat ini akan digunakan untuk menginstal driver HopToDesk saat diperlukan"),
         ("RDP Settings", "Pengaturan RDP"),
         ("Sort by", "Urutkan berdasarkan"),
         ("New Connection", "Koneksi baru"),

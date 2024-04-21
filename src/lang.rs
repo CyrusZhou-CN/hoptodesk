@@ -16,6 +16,7 @@ mod et;
 mod fa;
 mod fr;
 mod he;
+mod hr;
 mod hu;
 mod id;
 mod it;
@@ -64,6 +65,7 @@ lazy_static::lazy_static! {
     		("lv", "Latviešu"),            
     		("et", "Eesti keel"),    		
             ("sr", "Srpski"),
+            ("hr", "Hrvatski"),
             ("sq", "Shqip"),
             ("sk", "Slovenčina"),
             ("sl", "Slovenščina"),
@@ -156,6 +158,7 @@ pub fn translate_locale(name: String, locale: &str) -> String {
         "ar" => ar::T.deref(),
         "bg" => bg::T.deref(),        
         "he" => he::T.deref(),
+        "hr" => hr::T.deref(),
         _ => en::T.deref(),
     };
     if let Some(v) = m.get(&name as &str) {
