@@ -114,7 +114,7 @@ pub mod client {
             );
         }
         fn mouse_down(&mut self, button: MouseButton) -> enigo::ResultType {
-            handle_mouse(true, button, self.conn.clone(), &self.session);
+			handle_mouse(true, button, self.conn.clone(), &self.session);
             Ok(())
         }
         fn mouse_up(&mut self, button: MouseButton) {

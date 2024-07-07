@@ -69,7 +69,7 @@ class Body: Reactor.Component
                     <div class={!c.file ? "disabled" : ""} title={translate('Allow file copy and paste')}><icon .file /></div>
                     <div class={!c.restart ? "disabled" : ""} title={translate('Allow remote restart')}><icon .restart /></div>
                 </div> <div .permissions style="display: none; margin-top:8px;" >
-                    <div class={!c.recording ? "disabled" : ""} style="display: none;" title={translate('Allow recording session')}><icon .recording /></div>
+                    <div class={!c.recording ? "disabled" : ""} style="display: none;" title={translate('Enable recording session')}><icon .recording /></div>
                     <div class={!c.block_input ? "disabled" : ""} title={translate('Enable blocking user input')} style={is_win ? "" : "display:none;"}><icon .block_input /></div>
                 </div></div>
                 }

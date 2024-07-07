@@ -2,6 +2,7 @@ use serde_json::{json, value::Value};
 use std::ops::Deref;
 
 mod ar;
+mod be;
 mod bg;
 mod ca;
 mod cn;
@@ -13,6 +14,7 @@ mod en;
 mod eo;
 mod es;
 mod et;
+mod eu;
 mod fa;
 mod fr;
 mod he;
@@ -55,6 +57,7 @@ lazy_static::lazy_static! {
             ("pt", "Português (Brazil)"),
             ("ca", "Català"),
             ("eo", "Esperanto"),
+            ("eu", "Euskara"),            
             ("cs", "Čeština"),
             ("hu", "Magyar"),
             ("da", "Dansk"),
@@ -71,6 +74,7 @@ lazy_static::lazy_static! {
             ("sl", "Slovenščina"),
             ("ro", "Română"),            			
             ("bg", "български"),
+            ("be", "Беларуская"),            
             ("el", "Ελληνικά"),
             ("tr", "Türkçe"),
             ("ru", "Русский"),
@@ -127,6 +131,7 @@ pub fn translate_locale(name: String, locale: &str) -> String {
         "nl" => nl::T.deref(),
         "es" => es::T.deref(),
         "et" => et::T.deref(),
+        "eu" => eu::T.deref(),
         "hu" => hu::T.deref(),
         "ru" => ru::T.deref(),
         "eo" => eo::T.deref(),
@@ -157,6 +162,7 @@ pub fn translate_locale(name: String, locale: &str) -> String {
 		"lv" => lv::T.deref(),
         "ar" => ar::T.deref(),
         "bg" => bg::T.deref(),        
+        "be" => be::T.deref(),
         "he" => he::T.deref(),
         "hr" => hr::T.deref(),
         _ => en::T.deref(),

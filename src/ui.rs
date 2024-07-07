@@ -79,15 +79,23 @@ pub fn start(args: &mut [String]) {
     crate::platform::delegate::show_dock();
     #[cfg(all(target_os = "linux", feature = "inline"))]
     {
-        #[cfg(feature = "appimage")]
-        let prefix = std::env::var("APPDIR").unwrap_or("".to_string());
-        #[cfg(not(feature = "appimage"))]
-        let prefix = "".to_string();
-        #[cfg(feature = "flatpak")]
-        let dir = "/app";
-        #[cfg(not(feature = "flatpak"))]
-        let dir = "/usr";
-        sciter::set_library(&(prefix + dir + "/lib/hoptodesk/libsciter-gtk.so")).ok();
+        let app_dir = std::env::var("APPDIR").unwrap_or("".to_string());
+        let mut so_path = "/usr/lib/rustdesk/libsciter-gtk.so".to_owned();
+        for (prefix, dir) in [
+            ("", "/usr"),
+            ("", "/app"),
+            (&app_dir, "/usr"),
+            (&app_dir, "/app"),
+        ]
+        .iter()
+        {
+            let path = format!("{prefix}{dir}/lib/rustdesk/libsciter-gtk.so");
+            if std::path::Path::new(&path).exists() {
+                so_path = path;
+                break;
+            }
+        }
+        sciter::set_library(&so_path).ok();
     }
     #[cfg(windows)]
     // Check if there is a sciter.dll nearby.
@@ -122,6 +130,8 @@ pub fn start(args: &mut [String]) {
     frame.set_title(&crate::get_app_name());
     #[cfg(target_os = "macos")]
     crate::platform::delegate::make_menubar(frame.get_host(), args.is_empty());
+    #[cfg(windows)]
+    crate::platform::try_set_window_foreground(frame.get_hwnd() as _);
     let page;
     if args.len() > 1 && args[0] == "--play" {
         args[0] = "--connect".to_owned();
@@ -672,37 +682,33 @@ impl UI {
     fn run_temp_update(&self) {
 		#[cfg(windows)]
 		{
-			//use std::fs;
-			//let local_api_json = Config::path("api.json");
-			//if fs::metadata(&local_api_json).is_err() {
-				let exe_path = env::current_exe().expect("Failed to get current executable path").to_string_lossy().to_string();
-				std::fs::write(&Config::path("UpdatePath.toml"), exe_path.clone()).expect("Failed to write update path");
-	
-				let mut tempexepath = std::env::temp_dir();
-				tempexepath.push("HopToDesk-update.exe");
-				log::info!("Saving update to: {:?}", tempexepath);
-				let random_value = rand::random::<u64>().to_string();
-				let url = format!("https://www.hoptodesk.com/update-windows?update={}", random_value);
-				let rt = Runtime::new().unwrap();
-				rt.block_on(async {
-					log::info!("Downloading update...");
-					let response = reqwest::get(url).await.expect("Error downloading update");
-					let bytes = response.bytes().await.expect("Error reading token response");
-					let _ = std::fs::remove_file(tempexepath.clone());
-					let _ = std::fs::write(tempexepath.clone(), bytes);
-					log::info!("Update saved.");
-				});
-			
-				log::info!("Running update: {:?}", tempexepath.clone());
-				let runuac = tempexepath.clone();
-				if let Err(err) = crate::platform::windows::run_uac_hide(runuac.to_str().expect("Failed to convert executable path to string"), "--update") {
-					log::info!("UAC Run Error: {:?}", err);
-				} else {
-					log::info!("UAC Run success");
-				}
-			
-				std::process::exit(0);
-			//}
+			let exe_path = env::current_exe().expect("Failed to get current executable path").to_string_lossy().to_string();
+			std::fs::write(&Config::path("UpdatePath.toml"), exe_path.clone()).expect("Failed to write update path");
+
+			let mut tempexepath = std::env::temp_dir();
+			tempexepath.push("HopToDesk-update.exe");
+			log::info!("Saving update to: {:?}", tempexepath);
+			let random_value = rand::random::<u64>().to_string();
+			let url = format!("https://www.hoptodesk.com/update-windows?update={}", random_value);
+			let rt = Runtime::new().unwrap();
+			rt.block_on(async {
+				log::info!("Downloading update...");
+				let response = reqwest::get(url).await.expect("Error downloading update");
+				let bytes = response.bytes().await.expect("Error reading token response");
+				let _ = std::fs::remove_file(tempexepath.clone());
+				let _ = std::fs::write(tempexepath.clone(), bytes);
+				log::info!("Update saved.");
+			});
+		
+			log::info!("Running update: {:?}", tempexepath.clone());
+			let runuac = tempexepath.clone();
+			if let Err(err) = crate::platform::windows::run_uac_hide(runuac.to_str().expect("Failed to convert executable path to string"), "--update") {
+				log::info!("UAC Run Error: {:?}", err);
+			} else {
+				log::info!("UAC Run success");
+			}
+		
+			std::process::exit(0);
 		}
     }
 	
@@ -760,16 +766,16 @@ impl UI {
          has_hwcodec()
      }
 
-    fn has_gpucodec(&self) -> bool {
-        has_gpucodec()
+    fn has_vram(&self) -> bool {
+        has_vram()
     }
     
     fn get_langs(&self) -> String {
         get_langs()
     }
 
-    fn default_video_save_directory(&self) -> String {
-        default_video_save_directory()
+    fn video_save_directory(&self, root: bool) -> String {
+        video_save_directory(root)
     }
 
     fn handle_relay_id(&self, id: String) -> String {
@@ -904,10 +910,10 @@ impl sciter::EventHandler for UI {
         fn discover();
         fn get_lan_peers();
         fn get_uuid();
-        //fn has_hwcodec();
-        fn has_gpucodec();
+        fn has_hwcodec();
+        fn has_vram();
         fn get_langs();
-        fn default_video_save_directory();
+        fn video_save_directory(bool);
         fn handle_relay_id(String);
         fn get_login_device_info();
         fn support_remove_wallpaper();

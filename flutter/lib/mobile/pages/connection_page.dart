@@ -211,6 +211,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
   @override
   void dispose() {
     _idController.dispose();
+    if (Get.isRegistered<IDTextEditingController>()) {
+      Get.delete<IDTextEditingController>();
+    }
     super.dispose();
   }
 }
@@ -223,25 +226,6 @@ class WebMenu extends StatefulWidget {
 }
 
 class _WebMenuState extends State<WebMenu> {
-  String url = "";
-
-  @override
-  void initState() {
-    super.initState();
-    () async {
-      final urlRes = await bind.mainGetApiServer();
-      var update = false;
-      if (urlRes != url) {
-        url = urlRes;
-        update = true;
-      }
-
-      if (update) {
-        setState(() {});
-      }
-    }();
-  }
-
   @override
   Widget build(BuildContext context) {
     Provider.of<FfiModel>(context);
@@ -269,6 +253,14 @@ class _WebMenuState extends State<WebMenu> {
             } else {
               logOutConfirmDialog();
             }
+          /*}
+          if (value == 'scan') {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (BuildContext context) => ScanPage(),
+              ),
+            );*/
           }
         });
   }

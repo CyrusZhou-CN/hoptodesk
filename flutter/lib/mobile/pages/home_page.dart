@@ -4,6 +4,7 @@ import 'package:flutter_hbb/mobile/pages/settings_page.dart';
 import 'package:get/get.dart';
 import '../../common.dart';
 import '../../common/widgets/chat_page.dart';
+import '../../models/platform_model.dart';
 import 'connection_page.dart';
 
 abstract class PageShape extends Widget {
@@ -25,8 +26,9 @@ class HomePageState extends State<HomePage> {
   var _selectedIndex = 0;
   int get selectedIndex => _selectedIndex;
   final List<PageShape> _pages = [];
+  int _chatPageTabIndex = -1;
   bool get isChatPageCurrentTab => isAndroid
-      ? _selectedIndex == 1
+      ? _selectedIndex == _chatPageTabIndex
       : false; // change this when ios have chat page
 
   void refreshPages() {
@@ -43,8 +45,9 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
-    _pages.add(ConnectionPage());
-    if (isAndroid) {
+    if (!bind.isIncomingOnly()) _pages.add(ConnectionPage());
+    if (isAndroid && !bind.isOutgoingOnly()) {
+      _chatPageTabIndex = _pages.length;
       _pages.addAll([ChatPage(type: ChatPageType.mobileMain), ServerPage()]);
     }
     _pages.add(SettingsPage());
@@ -68,7 +71,7 @@ class HomePageState extends State<HomePage> {
           appBar: AppBar(
             backgroundColor:  MyTheme.headerGray,
             centerTitle: true,
-            title: Text("HopToDesk"),
+            title: appTitle(),
             actions: _pages.elementAt(_selectedIndex).appBarActions,
           ),
           bottomNavigationBar: BottomNavigationBar(
@@ -142,7 +145,7 @@ class HomePageState extends State<HomePage> {
         ],
       );
     }
-    return Text("HopToDesk");
+    return Text(bind.mainGetAppNameSync());
   }
 }
 
@@ -155,7 +158,7 @@ class WebHomePage extends StatelessWidget {
       // backgroundColor: MyTheme.grayBg,
       appBar: AppBar(
         centerTitle: true,
-        title: Text("HopToDesk" + (isWeb ? " (Beta) " : "")),
+        title: Text(bind.mainGetAppNameSync()),
         actions: connectionPage.appBarActions,
       ),
       body: connectionPage,

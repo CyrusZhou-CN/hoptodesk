@@ -94,7 +94,7 @@ pub trait InvokeUiCM: Send + Clone + 'static + Sized {
 
     fn new_message(&self, id: i32, text: String);
 
-    fn change_theme(&self, dark: String);
+	fn change_theme(&self, dark: String);
 
     fn change_language(&self);
 	
@@ -223,7 +223,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
         self.ui_handler.show_elevation(show);
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(target_os = "ios"))]
     fn voice_call_started(&self, id: i32) {
         if let Some(client) = CLIENTS.write().unwrap().get_mut(&id) {
             client.incoming_voice_call = false;
@@ -232,7 +232,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(target_os = "ios"))]
     fn voice_call_incoming(&self, id: i32) {
         if let Some(client) = CLIENTS.write().unwrap().get_mut(&id) {
             client.incoming_voice_call = true;
@@ -241,7 +241,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(target_os = "ios"))]
     fn voice_call_closed(&self, id: i32, _reason: &str) {
         if let Some(client) = CLIENTS.write().unwrap().get_mut(&id) {
             client.incoming_voice_call = false;
@@ -279,6 +279,15 @@ pub fn close(id: i32) {
     if let Some(client) = CLIENTS.read().unwrap().get(&id) {
         allow_err!(client.tx.send(Data::Close));
     };
+}
+
+#[inline]
+#[cfg(target_os = "android")]
+pub fn notify_input_control(v: bool) {
+    for (_, mut client) in CLIENTS.write().unwrap().iter_mut() {
+        client.keyboard = v;
+        allow_err!(client.tx.send(Data::InputControl(v)));
+    }
 }
 
 #[inline]
@@ -396,6 +405,7 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
 
         // for tmp use, without real conn id
         let mut write_jobs: Vec<fs::TransferJob> = Vec::new();
+
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         let is_authorized = self.cm.is_authorized(self.conn_id);
 
@@ -431,7 +441,7 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                 );
             }
         }
-        let (tx_log, _rx_log) = mpsc::unbounded_channel::<String>();
+        let (tx_log, mut rx_log) = mpsc::unbounded_channel::<String>();
 
         self.running = false;
         loop {
@@ -649,7 +659,9 @@ pub async fn start_ipc<T: InvokeUiCM>(cm: ConnectionManager<T>) {
             feature = "unix-file-copy-paste"
         ),
     ))]
-    ContextSend::enable(Config::get_option("enable-file-transfer").is_empty());
+    ContextSend::enable(
+        Config::get_option(hbb_common::config::keys::OPTION_ENABLE_FILE_TRANSFER).is_empty(),
+    );
     
     match ipc::new_listener("_cm").await {
         Ok(mut incoming) => {
@@ -734,6 +746,15 @@ pub async fn start_listen<T: InvokeUiCM>(
             }
             Some(Data::Close) => {
                 break;
+            }
+            Some(Data::StartVoiceCall) => {
+                cm.voice_call_started(current_id);
+            }
+            Some(Data::VoiceCallIncoming) => {
+                cm.voice_call_incoming(current_id);
+            }
+            Some(Data::CloseVoiceCall(reason)) => {
+                cm.voice_call_closed(current_id, reason.as_str());
             }
             None => {
                 break;

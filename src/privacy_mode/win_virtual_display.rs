@@ -1,9 +1,11 @@
-use super::{PrivacyMode, PrivacyModeState, INVALID_PRIVACY_MODE_CONN_ID, NO_DISPLAYS};
+use super::{PrivacyMode, PrivacyModeState, INVALID_PRIVACY_MODE_CONN_ID, NO_PHYSICAL_DISPLAYS};
 use crate::virtual_display_manager;
 use hbb_common::{allow_err, bail, config::Config, log, ResultType};
 use std::{
     io::Error,
     ops::{Deref, DerefMut},
+    thread,
+    time::Duration,
 };
 use virtual_display::MonitorMode;
 use winapi::{
@@ -27,13 +29,12 @@ use winapi::{
 
 pub(super) const PRIVACY_MODE_IMPL: &str = "privacy_mode_impl_virtual_display";
 
-const IDD_DEVICE_STRING: &'static str = "RustDeskIddDriver Device\0";
 const CONFIG_KEY_REG_RECOVERY: &str = "reg_recovery";
 
 struct Display {
     dm: DEVMODEW,
     name: [WCHAR; 32],
-    primary: bool,
+    _primary: bool,
 }
 
 pub struct PrivacyModeImpl {
@@ -134,11 +135,12 @@ impl PrivacyModeImpl {
             let display = Display {
                 dm,
                 name: dd.DeviceName,
-                primary,
+                _primary: primary,
             };
 
-            if let Ok(s) = std::string::String::from_utf16(&dd.DeviceString) {
-                if &s[..IDD_DEVICE_STRING.len()] == IDD_DEVICE_STRING {
+            let ds = virtual_display_manager::get_cur_device_string();
+            if let Ok(s) = String::from_utf16(&dd.DeviceString) {
+                if s.len() >= ds.len() && &s[..ds.len()] == ds {
                     self.virtual_displays.push(display);
                     continue;
                 }
@@ -147,36 +149,9 @@ impl PrivacyModeImpl {
         }
     }
 
-    fn restore(&mut self) {
-        Self::restore_displays(&self.displays);
-        Self::restore_displays(&self.virtual_displays);
-        allow_err!(Self::commit_change_display(0));
-        self.restore_plug_out_monitor();
-    }
-
     fn restore_plug_out_monitor(&mut self) {
-        let _ = virtual_display_manager::plug_out_peer_request(&self.virtual_displays_added);
+        let _ = virtual_display_manager::plug_out_monitor_indices(&self.virtual_displays_added);
         self.virtual_displays_added.clear();
-    }
-
-    fn restore_displays(displays: &[Display]) {
-        for display in displays {
-            unsafe {
-                let mut dm = display.dm.clone();
-                let flags = if display.primary {
-                    CDS_NORESET | CDS_UPDATEREGISTRY | CDS_SET_PRIMARY
-                } else {
-                    CDS_NORESET | CDS_UPDATEREGISTRY
-                };
-                ChangeDisplaySettingsExW(
-                    display.name.as_ptr(),
-                    &mut dm,
-                    std::ptr::null_mut(),
-                    flags,
-                    std::ptr::null_mut(),
-                );
-            }
-        }
     }
 
     fn set_primary_display(&mut self) -> ResultType<()> {
@@ -304,8 +279,18 @@ impl PrivacyModeImpl {
         if self.virtual_displays.is_empty() {
             let displays =
                 virtual_display_manager::plug_in_peer_request(vec![Self::default_display_modes()])?;
-            self.virtual_displays_added.extend(displays);
+            if virtual_display_manager::is_amyuni_idd() {
+                thread::sleep(Duration::from_secs(3));
+            }
             self.set_displays();
+
+            // No physical displays, no need to use the privacy mode.
+            if self.displays.is_empty() {
+                virtual_display_manager::plug_out_monitor_indices(&displays)?;
+                bail!(NO_PHYSICAL_DISPLAYS);
+            }
+
+            self.virtual_displays_added.extend(displays);
         }
 
         Ok(())
@@ -348,6 +333,10 @@ impl PrivacyModeImpl {
 }
 
 impl PrivacyMode for PrivacyModeImpl {
+    fn is_async_privacy_mode(&self) -> bool {
+        virtual_display_manager::is_amyuni_idd()
+    }
+
     fn init(&self) -> ResultType<()> {
         Ok(())
     }
@@ -367,8 +356,8 @@ impl PrivacyMode for PrivacyModeImpl {
         }
         self.set_displays();
         if self.displays.is_empty() {
-            log::debug!("No displays");
-            bail!(NO_DISPLAYS);
+            log::debug!("{}", NO_PHYSICAL_DISPLAYS);
+            bail!(NO_PHYSICAL_DISPLAYS);
         }
 
         let mut guard = TurnOnGuard {
@@ -379,7 +368,7 @@ impl PrivacyMode for PrivacyModeImpl {
         guard.ensure_virtual_display()?;
         if guard.virtual_displays.is_empty() {
             log::debug!("No virtual displays");
-            bail!("No virtual displays");
+            bail!("No virtual displays.");
         }
 
         let reg_connectivity_1 = reg_display_settings::read_reg_connectivity()?;
@@ -402,7 +391,6 @@ impl PrivacyMode for PrivacyModeImpl {
         // OpenInputDesktop and block the others' input ?
         guard.conn_id = conn_id;
         guard.succeeded = true;
-
         allow_err!(super::win_input::hook());
 
         Ok(true)
@@ -415,8 +403,8 @@ impl PrivacyMode for PrivacyModeImpl {
     ) -> ResultType<()> {
         self.check_off_conn_id(conn_id)?;
         super::win_input::unhook()?;
-        self.restore();
-        restore_reg_connectivity();
+        self.restore_plug_out_monitor();
+        restore_reg_connectivity(false);
 
         if self.conn_id != INVALID_PRIVACY_MODE_CONN_ID {
             if let Some(state) = state {
@@ -457,10 +445,13 @@ fn reset_config_reg_connectivity() {
     Config::set_option(CONFIG_KEY_REG_RECOVERY.to_owned(), "".to_owned());
 }
 
-pub fn restore_reg_connectivity() {
+pub fn restore_reg_connectivity(plug_out_monitors: bool) {
     let config_recovery_value = Config::get_option(CONFIG_KEY_REG_RECOVERY);
     if config_recovery_value.is_empty() {
         return;
+    }
+    if plug_out_monitors {
+        let _ = virtual_display_manager::plug_out_monitor(-1);
     }
     if let Ok(reg_recovery) =
         serde_json::from_str::<reg_display_settings::RegRecovery>(&config_recovery_value)

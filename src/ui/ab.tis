@@ -223,7 +223,7 @@ function getSessionsStyleOption(type) {
 function getSessionsStyle(type) {
     var v = handler.get_local_option(getSessionsStyleOption(type));
     if (!v) v = type == "ab" ? "list" : "tile";
-    return "list";
+    return v;
 }
 
 var searchPatterns = {};
@@ -605,7 +605,6 @@ function discover() {
     update();
 }
 
-//if (getSessionsType() == "lan" && handler.is_installed()) {
 if (getSessionsType() == "lan") {
     discover();
 }

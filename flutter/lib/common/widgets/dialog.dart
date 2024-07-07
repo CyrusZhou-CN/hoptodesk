@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -81,7 +81,7 @@ void changeIdDialog() {
       final Iterable violations = rules.where((r) => !r.validate(newId));
       if (violations.isNotEmpty) {
         setState(() {
-          msg = isDesktop
+          msg = (isDesktop || isWebDesktop)
               ? '${translate('Prompt')}:  ${violations.map((r) => r.name).join(', ')}'
               : violations.map((r) => r.name).join(', ');
         });
@@ -106,7 +106,7 @@ void changeIdDialog() {
       }
       setState(() {
         isInProgress = false;
-        msg = isDesktop
+        msg = (isDesktop || isWebDesktop)
             ? '${translate('Prompt')}: ${translate(status)}'
             : translate(status);
       });
@@ -143,7 +143,7 @@ void changeIdDialog() {
           const SizedBox(
             height: 8.0,
           ),
-          isDesktop
+          (isDesktop || isWebDesktop)
               ? Obx(() => Wrap(
                     runSpacing: 8,
                     spacing: 4,
@@ -178,11 +178,14 @@ void changeIdDialog() {
 }
 
 void changeWhiteList({Function()? callback}) async {
-  var newWhiteList = (await bind.mainGetOption(key: 'whitelist')).split(',');
-  var newWhiteListField = newWhiteList.join('\n');
+  final curWhiteList = await bind.mainGetOption(key: kOptionWhitelist);
+  var newWhiteListField = curWhiteList == defaultOptionWhitelist
+      ? ''
+      : curWhiteList.split(',').join('\n');
   var controller = TextEditingController(text: newWhiteListField);
   var msg = "";
   var isInProgress = false;
+  final isOptFixed = isOptionFixed(kOptionWhitelist);
   gFFI.dialogManager.show((setState, close, context) {
     return CustomAlertDialog(
       title: Text(translate("IP Whitelisting")),
@@ -202,6 +205,7 @@ void changeWhiteList({Function()? callback}) async {
                       errorText: msg.isEmpty ? null : translate(msg),
                     ),
                     controller: controller,
+                    enabled: !isOptFixed,
                     autofocus: true),
               ),
             ],
@@ -215,12 +219,15 @@ void changeWhiteList({Function()? callback}) async {
       ),
       actions: [
         dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("Clear", onPressed: () async {
-          await bind.mainSetOption(key: 'whitelist', value: '');
+        if (!isOptFixed)
+          dialogButton("Clear", onPressed: () async {
+          await bind.mainSetOption(
+              key: kOptionWhitelist, value: defaultOptionWhitelist);
           callback?.call();
           close();
         }, isOutline: true),
-        dialogButton(
+        if (!isOptFixed)
+          dialogButton(
           "OK",
           onPressed: () async {
             setState(() {
@@ -232,7 +239,8 @@ void changeWhiteList({Function()? callback}) async {
             if (newWhiteListField.isEmpty) {
               // pass
             } else {
-              final ips = newWhiteListField.trim().split(RegExp(r"[\s,;\n]+"));
+                final ips =
+                    newWhiteListField.trim().split(RegExp(r"[\s,;\n]+"));
               // test ip
               final ipMatch = RegExp(
                   r"^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)(\/([1-9]|[1-2][0-9]|3[0-2])){0,1}$");
@@ -249,7 +257,11 @@ void changeWhiteList({Function()? callback}) async {
               }
               newWhiteList = ips.join(',');
             }
-            await bind.mainSetOption(key: 'whitelist', value: newWhiteList);
+            if (newWhiteList.trim().isEmpty) {
+              newWhiteList = defaultOptionWhitelist;
+            }
+            await bind.mainSetOption(
+                key: kOptionWhitelist, value: newWhiteList);
             callback?.call();
             close();
           },
@@ -299,7 +311,7 @@ Future<String> changeDirectAccessPort(
         dialogButton("Cancel", onPressed: close, isOutline: true),
         dialogButton("OK", onPressed: () async {
           await bind.mainSetOption(
-              key: 'direct-access-port', value: controller.text);
+              key: kOptionDirectAccessPort, value: controller.text);
           close();
         }),
       ],
@@ -346,7 +358,7 @@ Future<String> changeAutoDisconnectTimeout(String old) async {
         dialogButton("Cancel", onPressed: close, isOutline: true),
         dialogButton("OK", onPressed: () async {
           await bind.mainSetOption(
-              key: 'auto-disconnect-timeout', value: controller.text);
+              key: kOptionAutoDisconnectTimeout, value: controller.text);
           close();
         }),
       ],
@@ -625,7 +637,7 @@ class _DialogVerificationCodeField extends State<DialogVerificationCodeField> {
 
     // software secure keyboard will take the focus since flutter 3.13
     // request focus again when android account password obtain focus
-    if (Platform.isAndroid && widget.reRequestFocus) {
+    if (isAndroid && widget.reRequestFocus) {
       _focusNode.addListener(() {
         if (_focusNode.hasFocus) {
           _timerReRequestFocus?.cancel();
@@ -694,7 +706,7 @@ class _PasswordWidgetState extends State<PasswordWidget> {
     }
     // software secure keyboard will take the focus since flutter 3.13
     // request focus again when android account password obtain focus
-    if (Platform.isAndroid && widget.reRequestFocus) {
+    if (isAndroid && widget.reRequestFocus) {
       _focusNode.addListener(() {
         if (_focusNode.hasFocus) {
           _timerReRequestFocus?.cancel();
@@ -713,7 +725,7 @@ class _PasswordWidgetState extends State<PasswordWidget> {
     _focusNode.dispose();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return DialogTextField(
@@ -990,7 +1002,6 @@ void showWaitUacDialog(
           ));
 }
 
-
 // Another username && password dialog?
 void showRequestElevationDialog(
     SessionID sessionId, OverlayDialogManager dialogManager) {
@@ -1110,7 +1121,7 @@ void showRequestElevationDialog(
                 errorText: errPwd.isEmpty ? null : errPwd.value,
               ),
             ],
-          ).marginOnly(left: isDesktop ? 35 : 0),
+          ).marginOnly(left: (isDesktop || isWebDesktop) ? 35 : 0),
         ).marginOnly(top: 10),
       ],
     ),
@@ -1242,7 +1253,7 @@ void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
             title: Row(children: [
               Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
               Flexible(
-                  child: Text(translate("Restart Remote Device"))
+                  child: Text(translate("Restart remote device"))
                       .paddingOnly(left: 10)),
             ]),
             content: Text(
@@ -1286,6 +1297,7 @@ showSetOSPassword(
       close();
       if (closeCallback != null) closeCallback();
     }
+
     submit() {
       var text = controller.text.trim();
       bind.sessionPeerOption(
@@ -1754,6 +1766,67 @@ void renameDialog(
   });
 }
 
+
+void changeBot({Function()? callback}) async {
+  if (bind.mainHasValidBotSync()) {
+    await bind.mainSetOption(key: "bot", value: "");
+    callback?.call();
+    return;
+  }
+  String errorText = '';
+  bool loading = false;
+  final controller = TextEditingController();
+  gFFI.dialogManager.show((setState, close, context) {
+    onVerify() async {
+      final token = controller.text.trim();
+      if (token == "") return;
+      loading = true;
+      errorText = '';
+      setState(() {});
+      final error = await bind.mainVerifyBot(token: token);
+      if (error == "") {
+        callback?.call();
+        close();
+      } else {
+        errorText = translate(error);
+        loading = false;
+        setState(() {});
+      }
+    }
+
+    final codeField = TextField(
+      autofocus: true,
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: translate('Token'),
+      ),
+    );
+
+    return CustomAlertDialog(
+      title: Text(translate("Telegram bot")),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(translate("enable-bot-desc"),
+                  style: TextStyle(fontSize: 12))
+              .marginOnly(bottom: 12),
+          Row(children: [Expanded(child: codeField)]),
+          if (errorText != '')
+            Text(errorText, style: TextStyle(color: Colors.red))
+                .marginOnly(top: 12),
+        ],
+      ),
+      actions: [
+        dialogButton("Cancel", onPressed: close, isOutline: true),
+        loading
+            ? CircularProgressIndicator()
+            : dialogButton("OK", onPressed: onVerify),
+      ],
+      onCancel: close,
+    );
+  });
+}
+
 void change2fa({Function()? callback}) async {
   if (bind.mainHasValid2FaSync()) {
     await bind.mainSetOption(key: "2fa", value: "");
@@ -1788,35 +1861,38 @@ void change2fa({Function()? callback}) async {
 
     getOnSubmit() => codeField.isReady ? onVerify : null;
 
-    return CustomAlertDialog(
-      title: Text(translate("enable-2fa-title")),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SelectableText(translate("enable-2fa-desc"),
-                  style: TextStyle(fontSize: 12))
-              .marginOnly(bottom: 12),
-          SizedBox(
-              width: 160,
-              height: 160,
-              child: QrImageView(
-                backgroundColor: Colors.white,
-                data: new2fa,
-                version: QrVersions.auto,
-                size: 160,
-                gapless: false,
-              )).marginOnly(bottom: 6),
-          SelectableText(secret ?? '', style: TextStyle(fontSize: 12))
-              .marginOnly(bottom: 12),
-          Row(children: [Expanded(child: codeField)]),
-        ],
-      ),
-      actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: getOnSubmit()),
-      ],
-      onCancel: close,
-    );
+	return CustomAlertDialog(
+	  title: Text(translate("enable-2fa-title")),
+	  content: Column(
+		crossAxisAlignment: CrossAxisAlignment.start,
+		children: [
+		  SelectableText(translate("enable-2fa-desc"),
+				  style: TextStyle(fontSize: 12))
+			  .marginOnly(bottom: 12),
+		  Center(
+			child: SizedBox(
+			  width: 160,
+			  height: 160,
+			  child: QrImageView(
+				backgroundColor: Colors.white,
+				data: new2fa,
+				version: QrVersions.auto,
+				size: 160,
+				gapless: false,
+			  ),
+			),
+		  ).marginOnly(bottom: 6),
+		  SelectableText(secret ?? '', style: TextStyle(fontSize: 12))
+			  .marginOnly(bottom: 12),
+		  Row(children: [Expanded(child: codeField)]),
+		],
+	  ),
+	  actions: [
+		dialogButton("Cancel", onPressed: close, isOutline: true),
+		dialogButton("OK", onPressed: getOnSubmit()),
+	  ],
+	  onCancel: close,
+	);
   });
 }
 
@@ -1865,7 +1941,6 @@ void enter2FaDialog(
         onCancel: cancel);
   });
 }
-
 
 // This dialog should not be dismissed, otherwise it will be black screen, have not reproduced this.
 void showWindowsSessionsDialog(
@@ -1920,11 +1995,9 @@ void addPeersToAbDialog(
   Future<bool> addTo(String abname) async {
     final mapList = peers.map((e) {
       var json = e.toJson();
-      // remove shared password when add to other address book
+      // remove password when add to another address book to avoid re-share
       json.remove('password');
-      if (gFFI.abModel.addressbooks[abname]?.isPersonal() != true) {
-        json.remove('hash');
-      }
+      json.remove('hash');
       return json;
     }).toList();
     final errMsg = await gFFI.abModel.addPeersTo(mapList, abname);
@@ -1988,6 +2061,7 @@ void addPeersToAbDialog(
       content: Obx(() => Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // https://github.com/flutter/flutter/issues/145081
               DropdownMenu(
                 initialSelection: currentName.value,
                 onSelected: (value) {
@@ -2028,18 +2102,23 @@ void addPeersToAbDialog(
 }
 
 void setSharedAbPasswordDialog(String abName, Peer peer) {
-  TextEditingController controller = TextEditingController(text: peer.password);
+  TextEditingController controller = TextEditingController(text: '');
   RxBool isInProgress = false.obs;
+  RxBool isInputEmpty = true.obs;
+  bool passwordVisible = false;
+  controller.addListener(() {
+    isInputEmpty.value = controller.text.isEmpty;
+  });
   gFFI.dialogManager.show((setState, close, context) {
-    submit() async {
+    change(String password) async {
       isInProgress.value = true;
-      bool res = await gFFI.abModel
-          .changeSharedPassword(abName, peer.id, controller.text);
-      close();
+      bool res =
+          await gFFI.abModel.changeSharedPassword(abName, peer.id, password);
       isInProgress.value = false;
       if (res) {
         showToast(translate('Successful'));
       }
+      close();
     }
 
     cancel() {
@@ -2051,22 +2130,38 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.key, color: MyTheme.accent),
-          Text(translate('Set shared password')).paddingOnly(left: 10),
+          Text(translate(peer.password.isEmpty
+                  ? 'Set shared password'
+                  : 'Change Password'))
+              .paddingOnly(left: 10),
         ],
       ),
       content: Obx(() => Column(children: [
             TextField(
               controller: controller,
-              obscureText: true,
               autofocus: true,
+              obscureText: !passwordVisible,
+              decoration: InputDecoration(
+                suffixIcon: IconButton(
+                  icon: Icon(
+                      passwordVisible ? Icons.visibility : Icons.visibility_off,
+                      color: MyTheme.lightTheme.primaryColor),
+                  onPressed: () {
+                    setState(() {
+                      passwordVisible = !passwordVisible;
+                    });
+                  },
+                ),
+              ),
             ),
-            Row(children: [
-              Icon(Icons.info, color: Colors.amber).marginOnly(right: 4),
-              Text(
-                translate('share_warning_tip'),
-                style: TextStyle(fontSize: 12),
-              )
-            ]).marginSymmetric(vertical: 10),
+            if (!gFFI.abModel.current.isPersonal())
+              Row(children: [
+                Icon(Icons.info, color: Colors.amber).marginOnly(right: 4),
+                Text(
+                  translate('share_warning_tip'),
+                  style: TextStyle(fontSize: 12),
+                )
+              ]).marginSymmetric(vertical: 10),
             // NOT use Offstage to wrap LinearProgressIndicator
             isInProgress.value ? const LinearProgressIndicator() : Offstage()
           ])),
@@ -2077,14 +2172,52 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
           onPressed: cancel,
           isOutline: true,
         ),
-        dialogButton(
-          "OK",
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
-        ),
+        if (peer.password.isNotEmpty)
+          dialogButton(
+            "Remove",
+            icon: Icon(Icons.delete_outline_rounded),
+            onPressed: () => change(''),
+            buttonStyle: ButtonStyle(
+                backgroundColor: MaterialStatePropertyAll(Colors.red)),
+          ),
+        Obx(() => dialogButton(
+              "OK",
+              icon: Icon(Icons.done_rounded),
+              onPressed:
+                  isInputEmpty.value ? null : () => change(controller.text),
+            )),
       ],
-      onSubmit: submit,
+      onSubmit: isInputEmpty.value ? null : () => change(controller.text),
       onCancel: cancel,
     );
   });
 }
+
+void CommonConfirmDialog(OverlayDialogManager dialogManager, String content,
+    VoidCallback onConfirm) {
+  dialogManager.show((setState, close, context) {
+    submit() {
+      close();
+      onConfirm.call();
+    }
+
+    return CustomAlertDialog(
+      content: Row(
+        children: [
+          Expanded(
+            child: Text(content,
+                style: const TextStyle(fontSize: 15),
+                textAlign: TextAlign.start),
+          ),
+        ],
+      ).marginOnly(bottom: 12),
+      actions: [
+        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
+        dialogButton(translate("OK"), onPressed: submit),
+      ],
+      onSubmit: submit,
+      onCancel: close,
+    );
+  });
+}
+

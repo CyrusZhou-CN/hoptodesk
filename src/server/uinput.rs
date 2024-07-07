@@ -130,14 +130,14 @@ pub mod client {
         }
 
         fn mouse_move_to(&mut self, x: i32, y: i32) {
-            allow_err!(self.send(Data::Mouse(DataMouse::MoveTo(x, y))));
+			allow_err!(self.send(Data::Mouse(DataMouse::MoveTo(x, y))));
         }
         fn mouse_move_relative(&mut self, x: i32, y: i32) {
             allow_err!(self.send(Data::Mouse(DataMouse::MoveRelative(x, y))));
         }
         // TODO: handle error???
         fn mouse_down(&mut self, button: MouseButton) -> enigo::ResultType {
-            allow_err!(self.send(Data::Mouse(DataMouse::Down(button))));
+			allow_err!(self.send(Data::Mouse(DataMouse::Down(button))));
             Ok(())
         }
         fn mouse_up(&mut self, button: MouseButton) {

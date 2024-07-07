@@ -7,6 +7,7 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/common/widgets/peer_card.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -45,14 +46,12 @@ class _AddressBookState extends State<AddressBook> {
               child: ElevatedButton(
                   onPressed: loginDialog, child: Text(translate("Login"))));
         } else {
-          if (gFFI.abModel.currentAbLoading.value &&
-              gFFI.abModel.currentAbEmtpy) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
           return Column(
             children: [
+              // NOT use Offstage to wrap LinearProgressIndicator
+              if (gFFI.abModel.currentAbLoading.value &&
+                  gFFI.abModel.currentAbEmpty)
+                const LinearProgressIndicator(),
               buildErrorBanner(context,
                   loading: gFFI.abModel.currentAbLoading,
                   err: gFFI.abModel.currentAbPullError,
@@ -64,7 +63,7 @@ class _AddressBookState extends State<AddressBook> {
                   retry: null, // remove retry
                   close: () => gFFI.abModel.currentAbPushError.value = ''),
               Expanded(
-                  child: isDesktop
+                  child: (isDesktop || isWebDesktop)
                       ? _buildAddressBookDesktop()
                       : _buildAddressBookMobile())
             ],
@@ -89,7 +88,10 @@ class _AddressBookState extends State<AddressBook> {
                 child: Column(
                   children: [
                     _buildAbDropdown(),
-                    _buildTagHeader().marginOnly(left: 8.0, right: 0),
+                    _buildTagHeader().marginOnly(
+                        left: 8.0,
+                        right: gFFI.abModel.legacyMode.value ? 8.0 : 0,
+                        top: gFFI.abModel.legacyMode.value ? 8.0 : 0),
                     Expanded(
                       child: Container(
                         width: double.infinity,
@@ -313,7 +315,7 @@ class _AddressBookState extends State<AddressBook> {
             return tagBuilder(e);
           });
       final maxHeight = max(MediaQuery.of(context).size.height / 6, 100.0);
-      return isDesktop
+      return (isDesktop || isWebDesktop)
           ? gridView
           : LimitedBox(maxHeight: maxHeight, child: gridView);
     });

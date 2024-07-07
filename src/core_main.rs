@@ -5,7 +5,7 @@ use crate::platform::breakdown_callback;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::platform::register_breakdown_handler;
 use hbb_common::{config, log};
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use std::fs;
 	
 use std::fs::write;
@@ -270,72 +270,111 @@ pub fn core_main() -> Option<Vec<String>> {
         } else if args[0] == "--tray" {
             if !crate::check_process("--tray", true) {
                 crate::tray::start_tray();
-				std::process::exit(0);
             }
             return None;
-        } else if args[0] == "--update" {
-			let mut lastpath = "".to_string();
-			let exe_path = std::env::current_exe().expect("Failed to get current executable path");
-			#[cfg(windows)]
-			if fs::metadata(Config::path("UpdatePath.toml")).is_ok() {
-				lastpath = std::fs::read_to_string(Config::path("UpdatePath.toml")).unwrap_or_else(|err| {
-						log::error!(
-							"Error reading file: {:?}({})",
-							Config::path("UpdatePath.toml").to_str(),
-							err
-						);
-						String::new()
-					});
+        } else if args[0] == "--changeid" {
+			let config_path = Config::path("HopToDesk.toml");
+			if let Ok(_metadata) = fs::metadata(&config_path) {
+				let content = std::fs::read_to_string(&config_path).unwrap_or_else(|err| {
+					log::error!(
+						"Error reading file: {:?}({})",
+						config_path.to_str(),
+						err
+					);
+					String::new()
+				});
 
-				if crate::platform::is_installed() {
-					let (_subkey, mut path, _start_menu, _, _) = crate::platform::windows::get_install_info();
-					path.push_str("\\HopToDesk.exe");
-					let _ = crate::platform::windows::run_uac_hide("sc", "stop HopToDesk");
-					let _ = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", &"HopToDesk"));
-					std::thread::sleep(std::time::Duration::from_secs(10));
-					let _ = fs::remove_file(path.clone());
-					let _ = fs::copy(&exe_path, &path);
-					std::thread::sleep(std::time::Duration::from_secs(1));
-					let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
-				}			
+				let filtered_content: String = content
+					.lines()
+					.filter(|line| !line.starts_with("enc_id = ") && !line.starts_with("salt = "))
+					.map(|line| format!("{}\n", line))
+					.collect();
 
-				if let Err(err) = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", &"HopToDesk")) {
-					
+				if let Err(err) = fs::write(&config_path, filtered_content) {
+					log::error!("Error writing file: {:?}({})", config_path.to_str(), err);
 				} else {
-					let _ = fs::remove_file(lastpath.clone());
-					let _ = fs::copy(&exe_path, &lastpath.clone());
+					log::info!("ID changed.");
 				}
-
-				if crate::platform::is_installed() {
-					let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
-				}
-
-				use std::process::Command;
-				std::thread::sleep(std::time::Duration::from_secs(5));
 			}
-
-            std::process::exit(0);
-        } else if args[0] == "--install-service" {
+			std::process::exit(0);
+        } else if args[0] == "--update" {
+		    let exe_path = std::env::current_exe().expect("Failed to get current executable path");
+		    #[cfg(windows)]
+		    if let Ok(_metadata) = fs::metadata(Config::path("UpdatePath.toml")) {
+		        let lastpath = std::fs::read_to_string(Config::path("UpdatePath.toml")).unwrap_or_else(|err| {
+		            log::error!(
+		                "Error reading file: {:?}({})",
+		                Config::path("UpdatePath.toml").to_str(),
+		                err
+		            );
+		            String::new()
+		        });
+		
+		        if crate::platform::is_installed() {
+		            let (subkey, mut path, _start_menu, _, _) = crate::platform::windows::get_install_info();
+		            path.push_str("\\HopToDesk.exe");
+		            
+		            for cmd in &[
+		                ("sc", "stop HopToDesk"),
+		                ("taskkill", &format!("/F /IM {:?}.exe", "HopToDesk")),
+		                ("reg", &format!("add {} /f /v DisplayVersion /t REG_SZ /d \"{}\"", subkey, crate::VERSION)),
+		                ("reg", &format!("add {} /f /v Version /t REG_SZ /d \"{}\"", subkey, crate::VERSION))
+		            ] {
+		                let _ = crate::platform::windows::run_uac_hide(cmd.0, cmd.1);
+		            }
+		
+		            std::thread::sleep(std::time::Duration::from_secs(10));
+		            
+		            if let Err(err) = fs::remove_file(&path) {
+		                log::error!("Failed to remove file: {}. Error: {}", path, err);
+		            }
+		
+		            if let Err(err) = fs::copy(&exe_path, &path) {
+		                log::error!("Failed to copy file to path: {}. Error: {}", path, err);
+		            }
+		
+		            std::thread::sleep(std::time::Duration::from_secs(1));
+		            let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
+		        }
+		
+		        if crate::platform::is_installed() {
+		            if let Err(err) = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", "HopToDesk")) {
+		                log::error!("Failed to kill task: HopToDesk. Error: {}", err);
+		            } else {
+		                if let Err(err) = fs::remove_file(&lastpath) {
+		                    log::error!("Failed to remove file: {}. Error: {}", lastpath, err);
+		                }
+		
+		                if let Err(err) = fs::copy(&exe_path, &lastpath) {
+		                    log::error!("Failed to copy file to last path: {}. Error: {}", lastpath, err);
+		                }
+		            }
+		
+		            let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
+		        }
+		
+		        std::thread::sleep(std::time::Duration::from_secs(5));
+		    }
+		    std::process::exit(0);
+		} else if args[0] == "--install-service" {
             log::info!("start --install-service");
             crate::platform::install_service();
             return None;
         } else if args[0] == "--uninstall-service" {
             log::info!("start --uninstall-service");
-            crate::platform::uninstall_service(false);
+            crate::platform::uninstall_service(false, true);
+            return None;
         } else if args[0] == "--service" {
-            #[cfg(target_os = "macos")]
-            crate::platform::macos::hide_dock();
             log::info!("start --service");
             crate::start_os_service();
             return None;
         } else if args[0] == "--server" {
             log::info!("start --server with user {}", crate::username());
-            #[cfg(all(windows, feature = "virtual_display_driver"))]
-            crate::privacy_mode::restore_reg_connectivity();
+            #[cfg(windows)]
+            crate::privacy_mode::restore_reg_connectivity(true);
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             {
                 crate::start_server(true);
-                return None;
             }
             #[cfg(target_os = "macos")]
             {
@@ -344,6 +383,7 @@ pub fn core_main() -> Option<Vec<String>> {
                 // prevent server exit when encountering errors from tray
                 hbb_common::allow_err!(handler.join());
             }
+            return None;
         } else if args[0] == "--import-config" {
 			if args.len() == 2 {
                 let filepath;
@@ -360,26 +400,23 @@ pub fn core_main() -> Option<Vec<String>> {
             return None;
         } else if args[0] == "--password" {
             if args.len() == 2 {
-                if crate::platform::is_root() {
-                    crate::ipc::set_permanent_password(args[1].to_owned()).unwrap();
+                if crate::platform::is_installed() && is_root() {
+                    if let Err(err) = crate::ipc::set_permanent_password(args[1].to_owned()) {
+                        println!("{err}");
+                    } else {
+                        println!("Done!");
+                    }
                 } else {
-                    println!("Administrative privileges required!");
+                    println!("Installation and administrative privileges required!");
                 }
             }
             return None;
         } else if args[0] == "--get-id" {
 			println!("{}", crate::ipc::get_id());
-			//return None;
-			std::process::exit(0);
-/*			if crate::platform::is_root() {
-                println!("{}", crate::ipc::get_id());
-            } else {
-				println!("Permission denied!");
-            }			
-            return None;*/
+			return None;
         } else if args[0] == "--check-hwcodec-config" {
             #[cfg(feature = "hwcodec")]
-            scrap::hwcodec::check_config();
+            crate::ipc::hwcodec_process();
             return None;
         } else if args[0] == "--cm" {
             // call connection manager to establish connections
@@ -387,7 +424,7 @@ pub fn core_main() -> Option<Vec<String>> {
             crate::ui_interface::start_option_status_sync();
         } else if args[0] == "--cm-no-ui" {
             #[cfg(feature = "flutter")]
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows")))]
             crate::flutter::connection_manager::start_cm_no_ui();
             return None;
         } else {
@@ -506,8 +543,8 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     {
         use winapi::um::winuser::WM_USER;
         let res = crate::platform::send_message_to_hnwd(
-            "FLUTTER_RUNNER_WIN32_WINDOW",
-            "HopToDesk",
+            &crate::platform::FLUTTER_RUNNER_WIN32_WINDOW_CLASS,
+            &crate::get_app_name(),
             (WM_USER + 2) as _, // referred from unilinks desktop pub
             uni_links.as_str(),
             false,
@@ -538,4 +575,15 @@ fn try_send_by_dbus(uni_links: String) -> Option<Vec<String>> {
             return Some(Vec::new());
         }
     }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn is_root() -> bool {
+    #[cfg(windows)]
+    {
+        return crate::platform::is_elevated(None).unwrap_or_default()
+            || crate::platform::is_root();
+    }
+    #[allow(unreachable_code)]
+    crate::platform::is_root()
 }

@@ -369,8 +369,8 @@ class Header: Reactor.Component {
          <textarea .outline-focus spellcheck="false" name="text" novalue="input note here" style="overflow: scroll-indicator; width:*; height: 140px; font-size: 1.2em; padding: 0.5em;">{self.conn_note}</textarea>
           </div>, "", function(res=null) {
             if (!res) return;
-            if (!res.text) return;
-            self.conn_note = res.text;
+            if (res.text == null || res.text == undefined) return;
+            self.conn_note = res.text ?? "";
             handler.send_note(res.text);
           }, 280);
     }
@@ -396,7 +396,8 @@ class Header: Reactor.Component {
     }
     
     event click $(#refresh) {
-        handler.refresh_video();
+        // 0 is just a dummy value. It will be ignored by the handler.
+        handler.refresh_video(0);
     }
 
     event click $(#block-input) {
@@ -496,7 +497,7 @@ function toggleMenuState() {
     for (var el in $$(menu#keyboard-options>li)) {
         el.attributes.toggleClass("selected", values.indexOf(el.id) >= 0);
     }
-    for (var id in ["show-remote-cursor", "show-quality-monitor", "disable-audio", "enable-file-transfer", "disable-clipboard", "lock-after-session-end", "allow_swap_key"]) {
+    for (var id in ["show-remote-cursor", "follow-remote-cursor", "follow-remote-window", "show-quality-monitor", "disable-audio", "enable-file-copy-paste", "disable-clipboard", "lock-after-session-end", "allow_swap_key"]) {
         var el = self.select('#' + id);
         if (el) {
             var value = handler.get_toggle_option(id);
@@ -538,6 +539,26 @@ handler.updatePi = function(v) {
 
 handler.updateDisplays = function(v) {
     pi.displays = v;
+    header.update();
+    if (is_port_forward) {
+        view.windowState = View.WINDOW_MINIMIZED;
+    }
+}
+
+handler.setMultipleWindowsSession = function(sessions) {
+    // It will be covered by other message box if the timer is not used, 
+    self.timer(1000ms, function() {
+        msgbox("multiple-sessions-nocancel", translate("Multiple Windows sessions found"), <MultipleSessionComponent sessions={sessions} />, "", function(res) {
+            if (res && res.sid) {
+                handler.set_selected_windows_session_id("" + res.sid);
+            }
+        }, 230);
+    });
+}
+
+handler.setCurrentDisplay = function(v) {
+    pi.current_display = v;
+    handler.switch_display(v);
     header.update();
     if (is_port_forward) {
         view.windowState = View.WINDOW_MINIMIZED;

@@ -209,6 +209,7 @@ class Enhancements: Reactor.Component {
     }
 
     function render() {
+        var support_remove_wallpaper = handler.support_remove_wallpaper();
         var me = this;
         self.timer(1ms, function() { me.toggleMenuState() });
         return <li>{translate('Enhancements')}
@@ -240,16 +241,18 @@ class Enhancements: Reactor.Component {
         } else if (v.indexOf("allow-") == 0) {
             handler.set_option(v, handler.get_option(v) == 'Y' ? '' : 'Y');
         } else if (v == 'screen-recording') {
-            var dir = handler.get_option("video-save-directory");
-            if (!dir) dir = handler.default_video_save_directory();
+            var show_root_dir = is_win && handler.is_installed();
+            var user_dir = handler.video_save_directory(false);
+            var root_dir = show_root_dir ? handler.video_save_directory(true) : "";
             var ts0 = handler.get_option("enable-record-session") == '' ? { checked: true } : {};
             var ts1 = handler.get_option("allow-auto-record-incoming") == 'Y' ? { checked: true } : {};
             msgbox("custom-recording", translate('Recording'),
                 <div .form>
-                    <div><button|checkbox(enable_record_session) {ts0}>{translate('Enable Recording Session')}</button></div>
+                    <div><button|checkbox(enable_record_session) {ts0}>{translate('Enable recording session')}</button></div>
                     <div><button|checkbox(auto_record_incoming) {ts1}>{translate('Automatically record incoming sessions')}</button></div>
                     <div>
-                        <div style="word-wrap:break-word"><span>{translate("Directory")}:&nbsp;&nbsp;</span><span #folderPath>{dir}</span></div>
+                        {show_root_dir ? <div style="word-wrap:break-word"><span>{translate("Incoming")}:&nbsp;&nbsp;</span><span>{root_dir}</span></div> : ""}
+                        <div style="word-wrap:break-word"><span>{translate(show_root_dir ? "Outgoing" : "Directory")}:&nbsp;&nbsp;</span><span #folderPath>{user_dir}</span></div>
                         <div> <button #select_directory .link>{translate('Change')}</button> </div>
                     </div>
                 </div>
@@ -1351,7 +1354,6 @@ function checkConnectStatus() {
     //handler.check_mouse_time(); // trigger connection status updater
 
     self.timer(1s, function() {
-
         var tmp = !!handler.get_option("stop-service");
         if (tmp != service_stopped) {
             service_stopped = tmp;
@@ -1399,7 +1401,7 @@ function self.onMouse(evt) {
 }
 
 function check_if_overlay() {
-    if (!handler.get_option('allow-remote-config-modification')) {
+    if (handler.get_option('allow-remote-config-modification') != 'Y') {
         var time0 = getTime();
         handler.check_mouse_time();
         self.timer(120ms, function() {
@@ -1411,3 +1413,13 @@ function check_if_overlay() {
 }
 
 checkConnectStatus();
+
+function set_local_user_info(user) {
+    var user_info = {name: user.name};
+    if (user.status) {
+        user_info.status = user.status;
+    }
+    handler.set_local_option("user_info", JSON.stringify(user_info));
+}
+
+

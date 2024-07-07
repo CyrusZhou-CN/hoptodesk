@@ -111,13 +111,13 @@ class PlatformFFI {
   /// Init the FFI class, loads the native Rust core library.
   Future<void> init(String appType) async {
     _appType = appType;
-    final dylib = Platform.isAndroid
+    final dylib = isAndroid
         ? DynamicLibrary.open('libhoptodesk.so')
-        : Platform.isLinux
+        : isLinux
             ? DynamicLibrary.open('libhoptodesk.so')
-            : Platform.isWindows
+            : isWindows
                 ? DynamicLibrary.open('libhoptodesk.dll')
-                : Platform.isMacOS
+                : isMacOS
                     ? DynamicLibrary.open("liblibhoptodesk.dylib")
                     : DynamicLibrary.process();
     debugPrint('initializing FFI $_appType');
@@ -130,11 +130,13 @@ class PlatformFFI {
         debugPrint('Failed to get documents directory: $e');
       }
       _ffiBind = HoptodeskImpl(dylib);
-      if (Platform.isLinux) {
-        // Start a dbus service, no need to await
-        _ffiBind.mainStartDbusServer();
-        _ffiBind.mainStartPa();
-      } else if (Platform.isMacOS && isMain) {
+      
+      if (isLinux) {
+        if (isMain) {
+          // Start a dbus service for uri links, no need to await
+          _ffiBind.mainStartDbusServer();
+        }
+      } else if (isMacOS && isMain) {
         // Start ipc service for uri links.
         _ffiBind.mainStartIpcUrlServer();
       }
@@ -154,20 +156,20 @@ class PlatformFFI {
       String id = 'NA';
       String name = 'Mobile';
       DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
+      if (isAndroid) {
         AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
         name = '${androidInfo.brand}-${androidInfo.model}';
         id = androidInfo.id.hashCode.toString();
-        androidVersion = androidInfo.version.sdkInt ?? 0;
-      } else if (Platform.isIOS) {
+        androidVersion = androidInfo.version.sdkInt;
+      } else if (isIOS) {
         IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
-        name = iosInfo.utsname.machine ?? '';
+        name = iosInfo.utsname.machine;
         id = iosInfo.identifierForVendor.hashCode.toString();
-      } else if (Platform.isLinux) {
+      } else if (isLinux) {
         LinuxDeviceInfo linuxInfo = await deviceInfo.linuxInfo;
         name = linuxInfo.name;
         id = linuxInfo.machineId ?? linuxInfo.id;
-      } else if (Platform.isWindows) {
+      } else if (isWindows) {
         try {
           // request windows build number to fix overflow on win7
           windowsBuildNumber = getWindowsTargetBuildNumber();
@@ -179,7 +181,7 @@ class PlatformFFI {
           name = "unknown";
           id = "unknown";
         }
-      } else if (Platform.isMacOS) {
+      } else if (isMacOS) {
         MacOsDeviceInfo macOsInfo = await deviceInfo.macOsInfo;
         name = macOsInfo.computerName;
         id = macOsInfo.systemGUID ?? '';
@@ -222,7 +224,9 @@ class PlatformFFI {
 
   /// Start listening to the Rust core's events and frames.
   void _startListenEvent(HoptodeskImpl hoptodeskImpl) {
-    var sink = hoptodeskImpl.startGlobalEventStream(appType: _appType);
+    final appType =
+        _appType == kAppTypeDesktopRemote ? '$_appType,$kWindowId' : _appType;
+    var sink = hoptodeskImpl.startGlobalEventStream(appType: appType);
     sink.listen((message) {
       () async {
         try {
@@ -244,7 +248,7 @@ class PlatformFFI {
     _eventCallback = fun;
   }
 
-  void setRgbaCallback(void Function(Uint8List) fun) async {}
+  void setRgbaCallback(void Function(int, Uint8List) fun) async {}
 
   void startDesktopWebListener() {}
 

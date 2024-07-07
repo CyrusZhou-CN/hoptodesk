@@ -257,6 +257,10 @@ impl InvokeUiSession for SciterHandler {
         // Ignore for sciter version.
     }
     
+    fn set_current_display(&self, _disp_idx: i32) {
+        self.call("setCurrentDisplay", &make_args!(_disp_idx));
+    }
+
     fn set_multiple_windows_session(&self, sessions: Vec<WindowsSession>) {
         let mut v = Value::array(0);
         let mut sessions = sessions;
@@ -494,7 +498,7 @@ impl sciter::EventHandler for SciterSession {
 impl SciterSession {
     pub fn new(cmd: String, id: String, password: String, tokenexp: String, args: Vec<String>) -> Self {
         let force_relay = args.contains(&"--relay".to_string());
-        let session: Session<SciterHandler> = Session {
+        let mut session: Session<SciterHandler> = Session {
             id: id.clone(),
             password: password.clone(),
 			tokenexp: tokenexp.clone(),
@@ -765,50 +769,14 @@ impl SciterSession {
         "".to_owned()
     }
 
-	fn transfer_file(&mut self) {
-	    let id = self.get_id();
-	    let id_password = crate::ipc::get_password_for_file_transfer();
-	    let id_passwords: Vec<&str> = id_password.split(":").collect();
-	
-	    let args = if !id_password.is_empty() {
-	        let idd = id_passwords[0];
-	        let password = id_passwords[1];
-	        if !password.is_empty() && idd == id {
-	            vec!["--file-transfer", &id, password]
-	        } else {
-	            vec!["--file-transfer", &id, &self.password]
-	        }
-	    } else {
-	        vec!["--file-transfer", &id, &self.password]
-	    };
-	    if let Err(err) = crate::run_me(args) {
-	        log::error!("Failed to spawn file transfer: {}", err);
-	    }
-	}
-	
-
-/*
     fn transfer_file(&mut self) {
         let id = self.get_id();
-        let id_password = crate::ipc::get_password_for_file_transfer();
-        let id_passwords: Vec<&str> = id_password.split(":").collect();
-
-        let args = if !id_password.is_empty() {
-            let idd = id_passwords[0].clone();
-            let password = id_passwords[1].clone();
-            if !password.is_empty() && idd == id {
-                vec!["--file-transfer", &id, password]
-            } else {
-                vec!["--file-transfer", &id, &self.password]
-            }
-        } else {
-            vec!["--file-transfer", &id, &self.password]
-        };
+        let args = vec!["--file-transfer", &id, &self.password];
         if let Err(err) = crate::run_me(args) {
             log::error!("Failed to spawn file transfer: {}", err);
         }
     }
-*/
+	
     fn tunnel(&mut self) {
         let id = self.get_id();
         let args = vec!["--port-forward", &id, &self.password];

@@ -194,7 +194,7 @@ impl MouseControllable for Enigo {
     }
 
     fn mouse_click(&mut self, button: MouseButton) {
-        self.mouse_down(button).ok();
+		self.mouse_down(button).ok();
         self.mouse_up(button);
     }
 

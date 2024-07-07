@@ -53,7 +53,7 @@ class _PeerCardState extends State<_PeerCard>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (isDesktop) {
+    if (isDesktop || isWebDesktop) {
       return _buildDesktop();
     } else {
       return _buildMobile();
@@ -619,7 +619,7 @@ abstract class BasePeerCard extends StatelessWidget {
       await _openNewConnInAction(id, 'Open in New Tab', kOptionOpenInTabs);
 
   _openInWindowsAction(String id) async => await _openNewConnInAction(
-      id, 'Open in New Window', kOptionOpenInWindows);
+      id, 'Open in new window', kOptionOpenInWindows);
 
   _openNewConnInOptAction(String id) async =>
       mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs)
@@ -866,7 +866,7 @@ class RecentPeerCard extends BasePeerCard {
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
-      _transferFileAction(context),
+      if (!isWeb) _transferFileAction(context),
     ];
 
     final List favs = (await bind.mainGetFav()).toList();
@@ -876,14 +876,16 @@ class RecentPeerCard extends BasePeerCard {
     }
     // menuItems.add(await _openNewConnInOptAction(peer.id));
     //menuItems.add(await _forceAlwaysRelayAction(peer.id)); //hophere
-    if (Platform.isWindows && peer.platform == kPeerPlatformWindows) {
+    if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
-    if (Platform.isWindows) {
+    if (isWindows) {
       menuItems.add(_createShortCutAction(peer.id));
     }
     menuItems.add(MenuEntryDivider());
-    menuItems.add(_renameAction(peer.id));
+    if (isMobile || isDesktop || isWebDesktop) {
+      menuItems.add(_renameAction(peer.id));
+    }
     if (await bind.mainPeerHasPassword(id: peer.id)) {
       menuItems.add(_unrememberPasswordAction(peer.id));
     }
@@ -921,21 +923,23 @@ class FavoritePeerCard extends BasePeerCard {
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
-      _transferFileAction(context),
+      if (!isWeb) _transferFileAction(context),
     ];
     if (isDesktop && peer.platform != kPeerPlatformAndroid) {
       menuItems.add(_tcpTunnelingAction(context));
     }
     // menuItems.add(await _openNewConnInOptAction(peer.id));
     //menuItems.add(await _forceAlwaysRelayAction(peer.id)); //hophere
-    if (Platform.isWindows && peer.platform == kPeerPlatformWindows) {
+    if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
-    if (Platform.isWindows) {
+    if (isWindows) {
       menuItems.add(_createShortCutAction(peer.id));
     }
     menuItems.add(MenuEntryDivider());
-    menuItems.add(_renameAction(peer.id));
+    if (isMobile || isDesktop || isWebDesktop) {
+      menuItems.add(_renameAction(peer.id));
+    }
     if (await bind.mainPeerHasPassword(id: peer.id)) {
       menuItems.add(_unrememberPasswordAction(peer.id));
     }
@@ -970,7 +974,7 @@ class DiscoveredPeerCard extends BasePeerCard {
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
-      _transferFileAction(context),
+      if (!isWeb) _transferFileAction(context),
     ];
 
     final List favs = (await bind.mainGetFav()).toList();
@@ -980,11 +984,11 @@ class DiscoveredPeerCard extends BasePeerCard {
     }
     // menuItems.add(await _openNewConnInOptAction(peer.id));
     //menuItems.add(await _forceAlwaysRelayAction(peer.id)); //hophere
-    if (Platform.isWindows && peer.platform == kPeerPlatformWindows) {
+    if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
     menuItems.add(_wolAction(peer.id));
-    if (Platform.isWindows) {
+    if (isWindows) {
       menuItems.add(_createShortCutAction(peer.id));
     }
 
@@ -1021,17 +1025,17 @@ class AddressBookPeerCard extends BasePeerCard {
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
-      _transferFileAction(context),
+      if (!isWeb) _transferFileAction(context),
     ];
     if (isDesktop && peer.platform != kPeerPlatformAndroid) {
       menuItems.add(_tcpTunnelingAction(context));
     }
     // menuItems.add(await _openNewConnInOptAction(peer.id));
-    //menuItems.add(await _forceAlwaysRelayAction(peer.id)); //hophere
-    if (Platform.isWindows && peer.platform == kPeerPlatformWindows) {
+    // menuItems.add(await _forceAlwaysRelayAction(peer.id));
+    if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
-    if (Platform.isWindows) {
+    if (isWindows) {
       menuItems.add(_createShortCutAction(peer.id));
     }
     if (gFFI.abModel.current.canWrite()) {
@@ -1062,9 +1066,11 @@ class AddressBookPeerCard extends BasePeerCard {
     return menuItems;
   }
 
+  // address book does not need to update
   @protected
   @override
-  void _update() => gFFI.abModel.pullAb(quiet: true);
+  void _update() =>
+      {}; //gFFI.abModel.pullAb(force: ForcePullAb.current, quiet: true);
 
   @protected
   MenuEntryBase<String> _editTagAction(String id) {
@@ -1091,7 +1097,8 @@ class AddressBookPeerCard extends BasePeerCard {
   MenuEntryBase<String> _changeSharedAbPassword() {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate('Set shared password'),
+        translate(
+            peer.password.isEmpty ? 'Set shared password' : 'Change Password'),
         style: style,
       ),
       proc: () {
@@ -1148,17 +1155,17 @@ class MyGroupPeerCard extends BasePeerCard {
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
-      _transferFileAction(context),
+      if (!isWeb) _transferFileAction(context),
     ];
     if (isDesktop && peer.platform != kPeerPlatformAndroid) {
       menuItems.add(_tcpTunnelingAction(context));
     }
     // menuItems.add(await _openNewConnInOptAction(peer.id));
-    // menuItems.add(await _forceAlwaysRelayAction(peer.id)); //hophere
-    if (Platform.isWindows && peer.platform == kPeerPlatformWindows) {
+    // menuItems.add(await _forceAlwaysRelayAction(peer.id));
+    if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
-    if (Platform.isWindows) {
+    if (isWindows) {
       menuItems.add(_createShortCutAction(peer.id));
     }
     // menuItems.add(MenuEntryDivider());

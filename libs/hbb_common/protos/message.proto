@@ -274,6 +274,10 @@ enum ControlKey {
   RShift = 73;
   RControl = 74;
   RAlt = 75;
+  VolumeMute = 76; // mainly used on mobile devices as controlled side
+  VolumeUp = 77;
+  VolumeDown = 78;
+  Power = 79; // mainly used on mobile devices as controlled side
   CtrlAltDel = 100;
   LockScreen = 101;
 }
@@ -317,6 +321,8 @@ message Hash {
 message Clipboard {
   bool compress = 1;
   bytes content = 2;
+  int32 width = 3;
+  int32 height = 4;
 }
 
 enum FileType {
@@ -507,6 +513,11 @@ message Resolution {
   int32 height = 2;
 }
 
+message DisplayResolution {
+  int32 display = 1;
+  Resolution resolution = 2;
+}
+
 message SupportedResolutions { repeated Resolution resolutions = 1; }
 
 message SwitchDisplay {
@@ -599,7 +610,10 @@ message OptionMessage {
   BoolOption disable_keyboard = 12;
 // Position 13 is used for Resolution. Remove later.
 // Resolution custom_resolution = 13;
-  BoolOption support_windows_specific_session = 14;
+// BoolOption support_windows_specific_session = 14;
+  // starting from 15 please, do not use removed fields
+  BoolOption follow_remote_cursor = 15;
+  BoolOption follow_remote_window = 16;
 }
 
 message TestDelay {
@@ -712,6 +726,13 @@ message WindowsSessions {
   uint32 current_sid = 2;
 }
 
+// Query messages from peer.
+message MessageQuery {
+  // The SwitchDisplay message of the target display.
+  // If the target display is not found, the message will be ignored.
+  int32 switch_display = 1;
+}
+
 message Misc {
   oneof union {
     ChatMessage chat_message = 4;
@@ -732,8 +753,10 @@ message Misc {
     bool portable_service_running = 20;
     SwitchSidesRequest switch_sides_request = 21;
     SwitchBack switch_back = 22;
+    // Deprecated since 1.2.4, use `change_display_resolution` (36) instead.
+    // But we must keep it for compatibility when peer version < 1.2.4.
     Resolution change_resolution = 24;
-    uint32 full_speed_fps = 27;
+    uint32 full_speed_fps = 27; // deprecated
     uint32 auto_adjust_fps = 28;
     bool client_record_status = 29;
     CaptureDisplays capture_displays = 30;
@@ -742,14 +765,10 @@ message Misc {
     TogglePrivacyMode toggle_privacy_mode = 33;
     SupportedEncoding supported_encoding = 34;
     uint32 selected_sid = 35;
-    // Direct response from the server with its initial public key (the one that exists
-    // prior to the key exchange process) as a last resort for use in situations where 
-    // we can't get it from a rendezvous server or from configuration.
-    // Should not be used if we can instead get an authenticated initial public key, 
-    // but where we can't, the encryption and key exchange this lets us support still
-    // leaves us relatively more secure (e.g., against passive eavesdropping attacks) than
-    // not supporting them at all. 
 	UnauthenticatedInitialPublicKeyResponse unauthenticated_initial_public_key_response = 36;
+    MessageQuery message_query = 37;	
+    int32 follow_current_display = 38;
+    DisplayResolution change_display_resolution = 39;
   }
 }
 	

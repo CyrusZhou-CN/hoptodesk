@@ -1,6 +1,7 @@
 use super::{PrivacyMode, INVALID_PRIVACY_MODE_CONN_ID};
 use crate::{privacy_mode::PrivacyModeState};
 use hbb_common::{allow_err, bail, log, ResultType};
+use std::ptr::null_mut;
 use std::{
     ffi::CString,
     time::{Duration, Instant},
@@ -72,6 +73,10 @@ pub struct PrivacyModeImpl {
 }
 
 impl PrivacyMode for PrivacyModeImpl {
+    fn is_async_privacy_mode(&self) -> bool {
+        false
+    }
+    
     fn init(&self) -> ResultType<()> {
         Ok(())
     }
@@ -119,8 +124,16 @@ impl PrivacyMode for PrivacyModeImpl {
 
         let hwnd = wait_find_privacy_hwnd(0)?;
         if hwnd.is_null() {
-            bail!("No privacy window created");
+            log::info!("No privacy window created");
         }
+		log::info!("Privacy Window hwnd: {:?}", hwnd);
+		unsafe {
+			let ex_style = GetWindowLongPtrW(hwnd as HWND, GWL_EXSTYLE) as u32;
+			let new_ex_style = ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT;
+			SetWindowLongPtrW(hwnd as HWND, GWL_EXSTYLE, new_ex_style as i32);
+			SetLayeredWindowAttributes(hwnd as HWND, 0, 255, LWA_ALPHA);
+		}
+			
         super::win_input::hook()?;
         unsafe {
             ShowWindow(hwnd as _, SW_SHOW);
@@ -260,8 +273,16 @@ impl PrivacyModeImpl {
 			}
 		}
 		
+/*
+		let class_name = CString::new("HopToDeskPrivacyWindow").expect("CString::new failed");
+		let hwnd: HWND = unsafe { FindWindowA(class_name.as_ptr(), null_mut()) };
 
-	
+		if hwnd.is_null() {
+			log::info!("Privacy Window not found.");
+		} else {
+			log::info!("Privacy Window handle: {:?}", hwnd);
+		}
+	*/
 
         Ok(())
     }

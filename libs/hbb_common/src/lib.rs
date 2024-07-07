@@ -47,14 +47,16 @@ pub use chrono;
 pub use directories_next;
 pub use libc;
 pub mod keyboard;
+pub use base64;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use dlopen;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use machine_uid;
-//#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use sysinfo;
+pub use thiserror;
 pub use toml;
 pub use uuid;
+
 
 #[cfg(feature = "quic")]
 pub type Stream = quic::Connection;
@@ -515,5 +517,13 @@ mod test {
         assert_eq!(AddrMangle::decode(&AddrMangle::encode(addr_v6)), addr_v6);
         let addr_v6 = "[::1]:8080".parse().unwrap();
         assert_eq!(AddrMangle::decode(&AddrMangle::encode(addr_v6)), addr_v6);
+    }
+
+    #[test]
+    fn test_get_version_number() {
+        assert_eq!(get_version_number("1.1.10"), 1001100);
+        assert_eq!(get_version_number("1.1.10-1"), 1001101);
+        assert_eq!(get_version_number("1.1.11-1"), 1001111);
+        assert_eq!(get_version_number("1.2.3"), 1002030);
     }
 }

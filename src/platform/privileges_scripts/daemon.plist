@@ -17,6 +17,8 @@
         <string>com.hoptodesk.HopToDesk_service</string>
         <key>KeepAlive</key>
         <true/>
+        <key>ThrottleInterval</key>
+        <integer>1</integer>
         <key>ProgramArguments</key>
         <array>
         	<string>/Applications/HopToDesk.app/Contents/MacOS/hoptodesk</string>

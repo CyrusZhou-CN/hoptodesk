@@ -206,14 +206,7 @@ fn main() {
 	{
 		if !crate::platform::is_installed() {
 			let dll_name_cstring = CString::new("sciter.dll").expect("Failed to create CString");
-			let _output = Command::new("taskkill")
-				.args(&["/F", "/IM", "RuntimeBroker_hoptodesk.exe"])
-				.stdout(Stdio::null())
-				.stderr(Stdio::null())
-				.stdin(Stdio::null())
-				.creation_flags(winapi::um::winbase::DETACHED_PROCESS)
-				.output()
-				.expect("Failed to execute taskkill command.");
+
 		
 			unsafe {
 				let h_module = ptr::null_mut();
@@ -231,10 +224,6 @@ fn main() {
 				FreeLibrary(dll_handle);
 			}
 			let _ = std::fs::remove_file(env::temp_dir().join("sciter.dll")).ok();
-			let _ = std::fs::remove_file(env::temp_dir().join("PrivacyMode.dll")).ok();
-			let _ = std::fs::remove_file(env::temp_dir().join("privacyhelper.exe")).ok();
-			thread::sleep(Duration::from_millis(200));
-			let _ = std::fs::remove_file(env::temp_dir().join("RuntimeBroker_hoptodesk.exe")).ok();
 		}
 	}
 }

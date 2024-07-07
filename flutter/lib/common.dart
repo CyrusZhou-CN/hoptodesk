@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:back_button_interceptor/back_button_interceptor.dart';
@@ -13,13 +12,13 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/main.dart';
-import 'package:flutter_hbb/models/desktop_render_texture.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
+import 'package:provider/provider.dart';
 import 'package:uni_links/uni_links.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
@@ -30,6 +29,8 @@ import '../consts.dart';
 import 'common/widgets/overlay.dart';
 import 'mobile/pages/file_manager_page.dart';
 import 'mobile/pages/remote_page.dart';
+import 'desktop/pages/remote_page.dart' as desktop_remote;
+import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/input_model.dart';
 import 'models/model.dart';
 import 'models/platform_model.dart';
@@ -49,10 +50,12 @@ final isMacOS = isMacOS_;
 final isLinux = isLinux_;
 final isDesktop = isDesktop_;
 final isWeb = isWeb_;
-var isWebDesktop = false;
+final isWebDesktop = isWebDesktop_;
 var isMobile = isAndroid || isIOS;
 var version = '';
 int androidVersion = 0;
+
+bool _linuxWindowResizable = true;
 
 /// only available for Windows target
 int windowsBuildNumber = 0;
@@ -61,6 +64,8 @@ DesktopType? desktopType;
 bool get isMainDesktopWindow =>
     desktopType == DesktopType.main || desktopType == DesktopType.cm;
     
+String get screenInfo => screenInfo_;
+
 /// Check if the app is running with single view mode.
 bool isSingleViewApp() {
   return desktopType == DesktopType.cm;
@@ -241,11 +246,13 @@ class MyTheme {
   );
 
   static SwitchThemeData switchTheme() {
-    return SwitchThemeData(splashRadius: isDesktop ? 0 : kRadialReactionRadius);
+    return SwitchThemeData(
+        splashRadius: (isDesktop || isWebDesktop) ? 0 : kRadialReactionRadius);
   }
 
   static RadioThemeData radioTheme() {
-    return RadioThemeData(splashRadius: isDesktop ? 0 : kRadialReactionRadius);
+    return RadioThemeData(
+        splashRadius: (isDesktop || isWebDesktop) ? 0 : kRadialReactionRadius);
   }
 
   // Checkbox
@@ -294,7 +301,7 @@ class MyTheme {
   static EdgeInsets dialogContentPadding({bool actions = true}) {
     final double p = dialogPadding;
 
-    return isDesktop
+    return (isDesktop || isWebDesktop)
         ? EdgeInsets.fromLTRB(p, p, p, actions ? (p - 4) : p)
         : EdgeInsets.fromLTRB(p, p, p, actions ? (p / 2) : p);
   }
@@ -302,12 +309,12 @@ class MyTheme {
   static EdgeInsets dialogActionsPadding() {
     final double p = dialogPadding;
 
-    return isDesktop
+    return (isDesktop || isWebDesktop)
         ? EdgeInsets.fromLTRB(p, 0, p, (p - 4))
         : EdgeInsets.fromLTRB(p, 0, (p - mobileTextButtonPaddingLR), (p / 2));
   }
 
-  static EdgeInsets dialogButtonPadding = isDesktop
+  static EdgeInsets dialogButtonPadding = (isDesktop || isWebDesktop)
       ? EdgeInsets.only(left: dialogPadding)
       : EdgeInsets.only(left: dialogPadding / 3);
 
@@ -338,6 +345,7 @@ class MyTheme {
   );
 
   static ThemeData lightTheme = ThemeData(
+    // https://stackoverflow.com/questions/77537315/after-upgrading-to-flutter-3-16-the-app-bar-background-color-button-size-and
     useMaterial3: false,
     brightness: Brightness.light,
     hoverColor: Color.fromARGB(255, 224, 224, 224),    
@@ -544,7 +552,8 @@ class MyTheme {
     Get.changeThemeMode(mode);
     if (desktopType == DesktopType.main || isAndroid || isIOS) {
       if (mode == ThemeMode.system) {
-        await bind.mainSetLocalOption(key: kCommConfKeyTheme, value: '');
+        await bind.mainSetLocalOption(
+            key: kCommConfKeyTheme, value: defaultOptionTheme);
       } else {
         await bind.mainSetLocalOption(
             key: kCommConfKeyTheme, value: mode.toShortString());
@@ -643,8 +652,12 @@ closeConnection({String? id}) {
     gFFI.chatModel.hideChatOverlay();
     Navigator.popUntil(globalKey.currentContext!, ModalRoute.withName("/"));
   } else {
-    final controller = Get.find<DesktopTabController>();
-    controller.closeBy(id);
+    if (isWeb) {
+      Navigator.popUntil(globalKey.currentContext!, ModalRoute.withName("/"));
+    } else {
+      final controller = Get.find<DesktopTabController>();
+      controller.closeBy(id);
+    }
   }
 }
 
@@ -707,7 +720,21 @@ class OverlayDialogManager {
   int _tagCount = 0;
 
   OverlayEntry? _mobileActionsOverlayEntry;
-  RxBool mobileActionsOverlayVisible = false.obs;
+  RxBool mobileActionsOverlayVisible = true.obs;
+
+  setMobileActionsOverlayVisible(bool v, {store = true}) {
+    if (store) {
+      bind.setLocalFlutterOption(k: kOptionShowMobileAction, v: v ? 'Y' : 'N');
+    }
+    // No need to read the value from local storage after setting it.
+    // It better to toggle the value directly.
+    mobileActionsOverlayVisible.value = v;
+  }
+
+  loadMobileActionsOverlayVisible() {
+    mobileActionsOverlayVisible.value =
+        bind.getLocalFlutterOption(k: kOptionShowMobileAction) != 'N';
+  }
 
   void setOverlayState(OverlayKeyState overlayKeyState) {
     _overlayKeyState = overlayKeyState;
@@ -822,7 +849,7 @@ class OverlayDialogManager {
                   Offstage(
                       offstage: !showCancel,
                       child: Center(
-                          child: isDesktop
+                          child: (isDesktop || isWebDesktop)
                               ? dialogButton('Cancel', onPressed: cancel)
                               : TextButton(
                                   style: flatButtonStyle,
@@ -848,40 +875,20 @@ class OverlayDialogManager {
     final overlayState = _overlayKeyState.state;
     if (overlayState == null) return;
 
-    // compute overlay position
-    final screenW = MediaQuery.of(globalKey.currentContext!).size.width;
-    final screenH = MediaQuery.of(globalKey.currentContext!).size.height;
-    const double overlayW = 200;
-    const double overlayH = 45;
-    final left = (screenW - overlayW) / 2;
-    final top = screenH - overlayH - 80;
-
-    final overlay = OverlayEntry(builder: (context) {
-      final session = ffi ?? gFFI;
-      return DraggableMobileActions(
-        position: Offset(left, top),
-        width: overlayW,
-        height: overlayH,
-        onBackPressed: () => session.inputModel.tap(MouseButtons.right),
-        onHomePressed: () => session.inputModel.tap(MouseButtons.wheel),
-        onRecentPressed: () async {
-          session.inputModel.sendMouse('down', MouseButtons.wheel);
-          await Future.delayed(const Duration(milliseconds: 500));
-          session.inputModel.sendMouse('up', MouseButtons.wheel);
-        },
-        onHidePressed: () => hideMobileActionsOverlay(),
-      );
-    });
+    final overlay = makeMobileActionsOverlayEntry(
+      () => hideMobileActionsOverlay(),
+      ffi: ffi,
+    );
     overlayState.insert(overlay);
     _mobileActionsOverlayEntry = overlay;
-    mobileActionsOverlayVisible.value = true;
+    setMobileActionsOverlayVisible(true);
   }
 
-  void hideMobileActionsOverlay() {
+  void hideMobileActionsOverlay({store = true}) {
     if (_mobileActionsOverlayEntry != null) {
       _mobileActionsOverlayEntry!.remove();
       _mobileActionsOverlayEntry = null;
-      mobileActionsOverlayVisible.value = false;
+      setMobileActionsOverlayVisible(false, store: store);
       return;
     }
   }
@@ -899,7 +906,48 @@ class OverlayDialogManager {
   }
 }
 
-void showToast(String text, {Duration timeout = const Duration(seconds: 2)}) {
+makeMobileActionsOverlayEntry(VoidCallback? onHide, {FFI? ffi}) {
+  makeMobileActions(BuildContext context, double s) {
+    final scale = s < 0.85 ? 0.85 : s;
+    final session = ffi ?? gFFI;
+    const double overlayW = 200;
+    const double overlayH = 45;
+    computeOverlayPosition() {
+      final screenW = MediaQuery.of(context).size.width;
+      final screenH = MediaQuery.of(context).size.height;
+      final left = (screenW - overlayW * scale) / 2;
+      final top = screenH - (overlayH + 80) * scale;
+      return Offset(left, top);
+    }
+
+    if (draggablePositions.mobileActions.isInvalid()) {
+      draggablePositions.mobileActions.update(computeOverlayPosition());
+    } else {
+      draggablePositions.mobileActions.tryAdjust(overlayW, overlayH, scale);
+    }
+    return DraggableMobileActions(
+      scale: scale,
+      position: draggablePositions.mobileActions,
+      width: overlayW,
+      height: overlayH,
+      onBackPressed: session.inputModel.onMobileBack,
+      onHomePressed: session.inputModel.onMobileHome,
+      onRecentPressed: session.inputModel.onMobileApps,
+      onHidePressed: onHide,
+    );
+  }
+
+  return OverlayEntry(builder: (context) {
+    if (isDesktop) {
+      final c = Provider.of<CanvasModel>(context);
+      return makeMobileActions(context, c.scale * 2.0);
+    } else {
+      return makeMobileActions(globalKey.currentContext!, 1.0);
+    }
+  });
+}
+
+void showToast(String text, {Duration timeout = const Duration(seconds: 3)}) {
   final overlayState = globalKey.currentState?.overlay;
   if (overlayState == null) return;
   final entry = OverlayEntry(builder: (context) {
@@ -978,7 +1026,8 @@ class CustomAlertDialog extends StatelessWidget {
           return KeyEventResult.handled; // avoid TextField exception on escape
         } else if (!tabTapped &&
             onSubmit != null &&
-            key.logicalKey == LogicalKeyboardKey.enter) {
+            (key.logicalKey == LogicalKeyboardKey.enter ||
+                key.logicalKey == LogicalKeyboardKey.numpadEnter)) {
           if (key is RawKeyDownEvent) onSubmit?.call();
           return KeyEventResult.handled;
         } else if (key.logicalKey == LogicalKeyboardKey.tab) {
@@ -1293,7 +1342,7 @@ class AndroidPermissionManager {
   }
 
   static Future<bool> check(String type) {
-    if (isDesktop) {
+    if (isDesktop || isWeb) {
       return Future.value(true);
     }
     return gFFI.invokeMethod("check_permission", type);
@@ -1307,7 +1356,7 @@ class AndroidPermissionManager {
   /// We use XXPermissions to request permissions,
   /// for supported types, see https://github.com/getActivity/XXPermissions/blob/e46caea32a64ad7819df62d448fb1c825481cd28/library/src/main/java/com/hjq/permissions/Permission.java
   static Future<bool> request(String type) {
-    if (isDesktop) {
+    if (isDesktop || isWeb) {
       return Future.value(true);
     }
 
@@ -1375,7 +1424,7 @@ Future<void> initGlobalFFI() async {
   _globalFFI = FFI(null);
   debugPrint("_globalFFI init end");
   // after `put`, can also be globally found by Get.find<FFI>();
-  Get.put(_globalFFI, permanent: true);
+  Get.put<FFI>(_globalFFI, permanent: true);
 }
 
 String translate(String name) {
@@ -1390,9 +1439,8 @@ bool option2bool(String option, String value) {
   if (option.startsWith("enable-")) {
     res = value != "N";
   } else if (option.startsWith("allow-") ||
-      option == "stop-service" ||
-      option == "direct-server" ||
-      option == "stop-rendezvous-service" ||
+      option == kOptionStopService ||
+      option == kOptionDirectServer ||
       option == kOptionForceAlwaysRelay) {
     res = value == "Y";
   } else {
@@ -1405,13 +1453,12 @@ bool option2bool(String option, String value) {
 String bool2option(String option, bool b) {
   String res;
   if (option.startsWith('enable-')) {
-    res = b ? '' : 'N';
+    res = b ? defaultOptionYes : 'N';
   } else if (option.startsWith('allow-') ||
-      option == "stop-service" ||
-      option == "direct-server" ||
-      option == "stop-rendezvous-service" ||
+      option == kOptionStopService ||
+      option == kOptionDirectServer ||
       option == kOptionForceAlwaysRelay) {
-    res = b ? 'Y' : '';
+    res = b ? 'Y' : defaultOptionNo;
   } else {
     assert(false);
     res = b ? 'Y' : 'N';
@@ -1443,10 +1490,6 @@ bool mainGetLocalBoolOptionSync(String key) {
 
 bool mainGetPeerBoolOptionSync(String id, String key) {
   return option2bool(key, bind.mainGetPeerOptionSync(id: id, key: key));
-}
-
-mainSetPeerBoolOptionSync(String id, String key, bool v) {
-  bind.mainSetPeerOptionSync(id: id, key: key, value: bool2option(key, v));
 }
 
 Future<bool> matchPeer(String searchText, Peer peer) async {
@@ -1484,6 +1527,12 @@ Widget getPlatformImage(String platform, {double size = 50}) {
 	platform = 'phone'; //hophere
   }
   return SvgPicture.asset('assets/$platform.svg', height: size, width: size);
+}
+
+class OffsetDevicePixelRatio {
+  Offset offset;
+  final double devicePixelRatio;
+  OffsetDevicePixelRatio(this.offset, this.devicePixelRatio);
 }
 
 class LastWindowPosition {
@@ -1547,39 +1596,43 @@ Future<void> saveWindowPosition(WindowType type, {int? windowId}) async {
   late Offset position;
   late Size sz;
   late bool isMaximized;
-  bool isFullscreen = stateGlobal.fullscreen.isTrue ||
-      (isMacOS && stateGlobal.closeOnFullscreen == true);
-  setFrameIfMaximized() {
-    if (isMaximized) {
-      final pos = bind.getLocalFlutterOption(k: windowFramePrefix + type.name);
-      var lpos = LastWindowPosition.loadFromString(pos);
-      position = Offset(
-          lpos?.offsetWidth ?? position.dx, lpos?.offsetHeight ?? position.dy);
-      sz = Size(lpos?.width ?? sz.width, lpos?.height ?? sz.height);
-    }
+  bool isFullscreen = stateGlobal.fullscreen.isTrue;
+  setPreFrame() {
+    final pos = bind.getLocalFlutterOption(k: windowFramePrefix + type.name);
+    var lpos = LastWindowPosition.loadFromString(pos);
+    position = Offset(
+        lpos?.offsetWidth ?? position.dx, lpos?.offsetHeight ?? position.dy);
+    sz = Size(lpos?.width ?? sz.width, lpos?.height ?? sz.height);
   }
 
   switch (type) {
     case WindowType.Main:
       isMaximized =
           bind.isIncomingOnly() ? false : await windowManager.isMaximized();
-      position = await windowManager.getPosition();
-      sz = await windowManager.getSize();
-      setFrameIfMaximized();
+      if (isFullscreen || isMaximized) {
+        setPreFrame();
+      } else {
+        position = await windowManager.getPosition();
+        sz = await windowManager.getSize();
+      }
       break;
     default:
       final wc = WindowController.fromWindowId(windowId!);
       isMaximized = await wc.isMaximized();
-      final Rect frame;
-      try {
-        frame = await wc.getFrame();
-      } catch (e) {
-        debugPrint("Failed to get frame of window $windowId, it may be hidden");
-        return;
+      if (isFullscreen || isMaximized) {
+        setPreFrame();
+      } else {
+        final Rect frame;
+        try {
+          frame = await wc.getFrame();
+        } catch (e) {
+          debugPrint(
+              "Failed to get frame of window $windowId, it may be hidden");
+          return;
+        }
+        position = frame.topLeft;
+        sz = frame.size;
       }
-      position = frame.topLeft;
-      sz = frame.size;
-      setFrameIfMaximized();
       break;
   }
   if (isWindows) {
@@ -1613,7 +1666,7 @@ Future _saveSessionWindowPosition(WindowType windowType, int windowId,
   final remoteList = await DesktopMultiWindow.invokeMethod(
       windowId, kWindowEventGetRemoteList, null);
   getPeerPos(String peerId) {
-    if (isMaximized) {
+    if (isMaximized || isFullscreen) {
       final peerPos = bind.mainGetPeerFlutterOptionSync(
           id: peerId, k: windowFramePrefix + windowType.name);
       var lpos = LastWindowPosition.loadFromString(peerPos);
@@ -1670,8 +1723,15 @@ Future<Size> _adjustRestoreMainWindowSize(double? width, double? height) async {
   return Size(restoreWidth, restoreHeight);
 }
 
+bool isPointInRect(Offset point, Rect rect) {
+  return point.dx >= rect.left &&
+      point.dx <= rect.right &&
+      point.dy >= rect.top &&
+      point.dy <= rect.bottom;
+}
+
 /// return null means center
-Future<Offset?> _adjustRestoreMainWindowOffset(
+Future<OffsetDevicePixelRatio?> _adjustRestoreMainWindowOffset(
   double? left,
   double? top,
   double? width,
@@ -1685,9 +1745,13 @@ Future<Offset?> _adjustRestoreMainWindowOffset(
   double? frameTop;
   double? frameRight;
   double? frameBottom;
+double devicePixelRatio = 1.0;
 
   if (isDesktop || isWebDesktop) {
     for (final screen in await window_size.getScreenList()) {
+      if (isPointInRect(Offset(left, top), screen.visibleFrame)) {
+        devicePixelRatio = screen.scaleFactor;
+      }
       frameLeft = frameLeft == null
           ? screen.visibleFrame.left
           : min(screen.visibleFrame.left, frameLeft);
@@ -1721,19 +1785,21 @@ Future<Offset?> _adjustRestoreMainWindowOffset(
       top < frameTop!) {
     return null;
   } else {
-    return Offset(left, top);
+    return OffsetDevicePixelRatio(Offset(left, top), devicePixelRatio);
   }
 }
 
 /// Restore window position and size on start
 /// Note that windowId must be provided if it's subwindow
+//
+// display is used to set the offset of the window in individual display mode.
 Future<bool> restoreWindowPosition(WindowType type,
     {int? windowId, String? peerId, int? display}) async {
-/*  if (bind
+  if (bind
       .mainGetEnv(key: "DISABLE_RUSTDESK_RESTORE_WINDOW_POSITION")
       .isNotEmpty) {
     return false;
-  }*/
+  }
   if (type != WindowType.Main && windowId == null) {
     debugPrint(
         "Error: windowId cannot be null when saving positions for sub window");
@@ -1745,15 +1811,10 @@ Future<bool> restoreWindowPosition(WindowType type,
   // No need to check mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs)
   // Though "open in tabs" is true and the new window restore peer position, it's ok.
   if (type == WindowType.RemoteDesktop && windowId != null && peerId != null) {
-    // If the restore position is called by main window, and the peer id is not null
-    // then we may need to get the position by reading the peer config.
-    // Because the session may not be read at this time.
-    if (desktopType == DesktopType.main) {
-      pos = bind.mainGetPeerFlutterOptionSync(
-          id: peerId, k: windowFramePrefix + type.name);
-    } else {
-      pos = await bind.sessionGetFlutterOptionByPeerId(
-          id: peerId, k: windowFramePrefix + type.name);
+    final peerPos = bind.mainGetPeerFlutterOptionSync(
+        id: peerId, k: windowFramePrefix + type.name);
+    if (peerPos.isNotEmpty) {
+      pos = peerPos;
     }
     isRemotePeerPos = pos != null;
   }
@@ -1784,22 +1845,47 @@ Future<bool> restoreWindowPosition(WindowType type,
   }
 
   final size = await _adjustRestoreMainWindowSize(lpos.width, lpos.height);
-  final offset = await _adjustRestoreMainWindowOffset(
+  final offsetDevicePixelRatio = await _adjustRestoreMainWindowOffset(
     lpos.offsetWidth,
     lpos.offsetHeight,
     size.width,
     size.height,
   );
   debugPrint(
-      "restore lpos: ${size.width}/${size.height}, offset:${offset?.dx}/${offset?.dy}");
+      "restore lpos: ${size.width}/${size.height}, offset:${offsetDevicePixelRatio?.offset.dx}/${offsetDevicePixelRatio?.offset.dy}, devicePixelRatio:${offsetDevicePixelRatio?.devicePixelRatio}, isMaximized: ${lpos.isMaximized}, isFullscreen: ${lpos.isFullscreen}");
 
   switch (type) {
     case WindowType.Main:
+      // https://github.com/rustdesk/rustdesk/issues/8038
+      // `setBounds()` in `window_manager` will use the current devicePixelRatio.
+      // So we need to adjust the offset by the scale factor.
+      // https://github.com/rustdesk-org/window_manager/blob/f19acdb008645366339444a359a45c3257c8b32e/windows/window_manager.cpp#L701
+      if (isWindows) {
+        double? curDevicePixelRatio;
+        Offset curPos = await windowManager.getPosition();
+        for (final screen in await window_size.getScreenList()) {
+          if (isPointInRect(curPos, screen.visibleFrame)) {
+            curDevicePixelRatio = screen.scaleFactor;
+          }
+        }
+        if (curDevicePixelRatio != null &&
+            curDevicePixelRatio != 0 &&
+            offsetDevicePixelRatio != null) {
+          if (offsetDevicePixelRatio.devicePixelRatio != 0) {
+            final scale =
+                offsetDevicePixelRatio.devicePixelRatio / curDevicePixelRatio;
+            offsetDevicePixelRatio.offset =
+                offsetDevicePixelRatio.offset.scale(scale, scale);
+            debugPrint(
+                "restore new offset: ${offsetDevicePixelRatio.offset.dx}/${offsetDevicePixelRatio.offset.dy}, scale:$scale");
+          }
+        }
+      }
       restorePos() async {
-        if (offset == null) {
+        if (offsetDevicePixelRatio == null) {
           await windowManager.center();
         } else {
-          await windowManager.setPosition(offset);
+          await windowManager.setPosition(offsetDevicePixelRatio.offset);
         }
       }
       if (lpos.isMaximized == true) {
@@ -1817,19 +1903,27 @@ Future<bool> restoreWindowPosition(WindowType type,
     default:
       final wc = WindowController.fromWindowId(windowId!);
       restoreFrame() async {
-        if (offset == null) {
+        if (offsetDevicePixelRatio == null) {
           await wc.center();
         } else {
-          final frame =
-              Rect.fromLTWH(offset.dx, offset.dy, size.width, size.height);
+          final frame = Rect.fromLTWH(offsetDevicePixelRatio.offset.dx,
+              offsetDevicePixelRatio.offset.dy, size.width, size.height);
           await wc.setFrame(frame);
         }
       }
       if (lpos.isFullscreen == true) {
-        await restoreFrame();
+        if (!isMacOS) {
+          await restoreFrame();
+        }
         // An duration is needed to avoid the window being restored after fullscreen.
         Future.delayed(Duration(milliseconds: 300), () async {
-          stateGlobal.setFullscreen(true);
+          if (kWindowId == windowId) {
+            stateGlobal.setFullscreen(true);
+          } else {
+            // If is not current window, we need to send a fullscreen message to `windowId`
+            DesktopMultiWindow.invokeMethod(
+                windowId, kWindowEventSetFullscreen, 'true');
+          }
         });
       } else if (lpos.isMaximized == true) {
         await restoreFrame();
@@ -2295,7 +2389,9 @@ Future<void> onActiveWindowChanged() async {
       await windowManager.setPreventClose(false);
       await windowManager.close();
       if (isMacOS) {
-        RdPlatformChannel.instance.terminate();
+        Future.delayed(Duration.zero, () {
+          RdPlatformChannel.instance.terminate();
+        });
       }
     }
   }
@@ -2408,7 +2504,7 @@ Widget dialogButton(String text,
     Widget? icon,
     TextStyle? style,
     ButtonStyle? buttonStyle}) {
-  if (isDesktop) {
+  if (isDesktop || isWebDesktop) {
     if (isOutline) {
       return icon == null
           ? OutlinedButton(
@@ -2450,19 +2546,20 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
+  final name = bind.mainGetAppNameSync();
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
-      return "HopToDesk";
+      return name;
     case WindowType.FileTransfer:
-      return "File Transfer - HopToDesk";
+      return "File Transfer - $name";
     case WindowType.PortForward:
-      return "Port Forward - HopToDesk";
+      return "Port Forward - $name";
     case WindowType.RemoteDesktop:
-      return "Remote Desktop - HopToDesk";
+      return "Remote Desktop - $name";
     default:
       break;
   }
-  return "HopToDesk";
+  return name;
 }
 
 String getWindowNameWithId(String id, {WindowType? overrideType}) {
@@ -2486,7 +2583,7 @@ Future<void> updateSystemWindowTheme() async {
 ///
 /// Note: not found a general solution for rust based AVFoundation bingding.
 /// [AVFoundation] crate has compile error.
-const kMacOSPermChannel = MethodChannel("org.rustdesk.rustdesk/macos");
+const kMacOSPermChannel = MethodChannel("org.hoptodesk.hoptodesk/macos");
 
 enum PermissionAuthorizeType {
   undetermined,
@@ -2572,8 +2669,32 @@ Future<void> start_service(bool is_start) async {
       !isMacOS ||
       await callMainCheckSuperUserPermission();
   if (checked) {
-    bind.mainSetOption(key: "stop-service", value: is_start ? "" : "Y");
+    mainSetBoolOption(kOptionStopService, !is_start);
   }
+}
+
+Future<bool> canBeBlocked() async {
+  var access_mode = await bind.mainGetOption(key: kOptionAccessMode);
+  var option = option2bool(kOptionAllowRemoteConfigModification,
+      await bind.mainGetOption(key: kOptionAllowRemoteConfigModification));
+  return access_mode == 'view' || (access_mode.isEmpty && !option);
+}
+
+Future<void> shouldBeBlocked(RxBool block, WhetherUseRemoteBlock? use) async {
+  if (use != null && !await use()) {
+    block.value = false;
+    return;
+  }
+  var time0 = DateTime.now().millisecondsSinceEpoch;
+  await bind.mainCheckMouseTime();
+  Timer(const Duration(milliseconds: 120), () async {
+    var d = time0 - await bind.mainGetMouseTime();
+    if (d < 120) {
+      block.value = true;
+    } else {
+      block.value = false;
+    }
+  });
 }
 
 typedef WhetherUseRemoteBlock = Future<bool> Function();
@@ -2581,18 +2702,7 @@ Widget buildRemoteBlock({required Widget child, WhetherUseRemoteBlock? use}) {
   var block = false.obs;
   return Obx(() => MouseRegion(
         onEnter: (_) async {
-          if (use != null && !await use()) {
-            block.value = false;
-            return;
-          }
-          var time0 = DateTime.now().millisecondsSinceEpoch;
-          await bind.mainCheckMouseTime();
-          Timer(const Duration(milliseconds: 120), () async {
-            var d = time0 - await bind.mainGetMouseTime();
-            if (d < 120) {
-              block.value = true;
-            }
-          });
+          await shouldBeBlocked(block, use);
         },
         onExit: (event) => block.value = false,
         child: Stack(children: [
@@ -2649,12 +2759,10 @@ Widget buildErrorBanner(BuildContext context,
     required RxString err,
     required Function? retry,
     required Function close}) {
-  const double height = 25;
   return Obx(() => Offstage(
         offstage: !(!loading.value && err.value.isNotEmpty),
         child: Center(
             child: Container(
-          height: height,
           color: MyTheme.color(context).errorBannerBg,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2673,7 +2781,6 @@ Widget buildErrorBanner(BuildContext context,
                       message: translate(err.value),
                       child: Text(
                         translate(err.value),
-                        overflow: TextOverflow.ellipsis,
                       ),
                     )).marginSymmetric(vertical: 2),
               ),
@@ -2702,7 +2809,7 @@ Widget buildErrorBanner(BuildContext context,
 
 String getDesktopTabLabel(String peerId, String alias) {
   String label = alias.isEmpty ? peerId : alias;
-  /*try {
+  try {
     String peer = bind.mainGetPeerSync(id: peerId);
     Map<String, dynamic> config = jsonDecode(peer);
     if (config['info']['hostname'] is String) {
@@ -2714,10 +2821,9 @@ String getDesktopTabLabel(String peerId, String alias) {
     }
   } catch (e) {
     debugPrint("Failed to get hostname:$e");
-  }*/
+  }
   return label;
 }
-
 
 sessionRefreshVideo(SessionID sessionId, PeerInfo pi) async {
   if (pi.currentDisplay == kAllDisplayValue) {
@@ -2728,11 +2834,6 @@ sessionRefreshVideo(SessionID sessionId, PeerInfo pi) async {
     await bind.sessionRefresh(sessionId: sessionId, display: pi.currentDisplay);
   }
 }
-
-bool isChooseDisplayToOpenInNewWindow(PeerInfo pi, SessionID sessionId) =>
-    pi.isSupportMultiDisplay &&
-    useTextureRender &&
-    bind.sessionGetDisplaysAsIndividualWindows(sessionId: sessionId) == 'Y';
 
 Future<List<Rect>> getScreenListWayland() async {
   final screenRectList = <Rect>[];
@@ -2830,6 +2931,16 @@ openMonitorInNewTabOrWindow(int i, String peerId, PeerInfo pi,
   }
   DesktopMultiWindow.invokeMethod(
       kMainWindowId, kWindowEventOpenMonitorSession, jsonEncode(args));
+}
+
+setNewConnectWindowFrame(
+    int windowId, String peerId, int? display, Rect? screenRect) async {
+  if (screenRect == null) {
+    await restoreWindowPosition(WindowType.RemoteDesktop,
+        windowId: windowId, display: display, peerId: peerId);
+  } else {
+    await tryMoveToScreenAndSetFullscreen(screenRect);
+  }
 }
 
 tryMoveToScreenAndSetFullscreen(Rect? screenRect) async {
@@ -3093,6 +3204,27 @@ Color? disabledTextColor(BuildContext context, bool enabled) {
       : Theme.of(context).textTheme.titleLarge?.color?.withOpacity(0.6);
 }
 
+Widget loadPowered(BuildContext context) {
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: () {
+        launchUrl(Uri.parse('https://rustdesk.com'));
+      },
+      child: Opacity(
+          opacity: 0.5,
+          child: Text(
+            translate("powered_by_me"),
+            overflow: TextOverflow.clip,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontSize: 9, decoration: TextDecoration.underline),
+          )),
+    ),
+  ).marginOnly(top: 6);
+}
+
 // max 300 x 60
 Widget loadLogo() {
   return FutureBuilder<ByteData>(
@@ -3141,4 +3273,139 @@ Size getIncomingOnlySettingsSize() {
 bool isInHomePage() {
   final controller = Get.find<DesktopTabController>();
   return controller.state.value.selected == 0;
+}
+
+Widget buildPresetPasswordWarning() {
+  return FutureBuilder<bool>(
+    future: bind.isPresetPassword(),
+    builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return CircularProgressIndicator(); // Show a loading spinner while waiting for the Future to complete
+      } else if (snapshot.hasError) {
+        return Text(
+            'Error: ${snapshot.error}'); // Show an error message if the Future completed with an error
+      } else if (snapshot.hasData && snapshot.data == true) {
+        return Container(
+          color: Colors.yellow,
+          child: Column(
+            children: [
+              Align(
+                  child: Text(
+                translate("Security Alert"),
+                style: TextStyle(
+                  color: Colors.red,
+                  fontSize:
+                      18, // https://github.com/rustdesk/rustdesk-server-pro/issues/261
+                  fontWeight: FontWeight.bold,
+                ),
+              )).paddingOnly(bottom: 8),
+              Text(
+                translate("preset_password_warning"),
+                style: TextStyle(color: Colors.red),
+              )
+            ],
+          ).paddingAll(8),
+        ); // Show a warning message if the Future completed with true
+      } else {
+        return SizedBox
+            .shrink(); // Show nothing if the Future completed with false or null
+      }
+    },
+  );
+}
+
+// https://github.com/leanflutter/window_manager/blob/87dd7a50b4cb47a375b9fc697f05e56eea0a2ab3/lib/src/widgets/virtual_window_frame.dart#L44
+Widget buildVirtualWindowFrame(BuildContext context, Widget child) {
+  boxShadow() => isMainDesktopWindow
+      ? <BoxShadow>[
+          if (stateGlobal.fullscreen.isFalse || stateGlobal.isMaximized.isFalse)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              offset: Offset(
+                  0.0,
+                  stateGlobal.isFocused.isTrue
+                      ? kFrameBoxShadowOffsetFocused
+                      : kFrameBoxShadowOffsetUnfocused),
+              blurRadius: kFrameBoxShadowBlurRadius,
+            ),
+        ]
+      : null;
+  return Obx(
+    () => Container(
+      decoration: BoxDecoration(
+        color: isMainDesktopWindow
+            ? Colors.transparent
+            : Theme.of(context).colorScheme.background,
+        border: Border.all(
+          color: Theme.of(context).dividerColor,
+          width: stateGlobal.windowBorderWidth.value,
+        ),
+        borderRadius: BorderRadius.circular(
+          (stateGlobal.fullscreen.isTrue || stateGlobal.isMaximized.isTrue)
+              ? 0
+              : kFrameBorderRadius,
+        ),
+        boxShadow: boxShadow(),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(
+          (stateGlobal.fullscreen.isTrue || stateGlobal.isMaximized.isTrue)
+              ? 0
+              : kFrameClipRRectBorderRadius,
+        ),
+        child: child,
+      ),
+    ),
+  );
+}
+
+get windowEdgeSize => isLinux && !_linuxWindowResizable ? 0.0 : kWindowEdgeSize;
+
+// `windowManager.setResizable(false)` will reset the window size to the default size on Linux and then set unresizable.
+// See _linuxWindowResizable for more details.
+// So we use `setResizable()` instead of `windowManager.setResizable()`.
+//
+// We can only call `windowManager.setResizable(false)` if we need the default size on Linux.
+setResizable(bool resizable) {
+  if (isLinux) {
+    _linuxWindowResizable = resizable;
+    stateGlobal.refreshResizeEdgeSize();
+  } else {
+    windowManager.setResizable(resizable);
+  }
+}
+
+isOptionFixed(String key) => bind.mainIsOptionFixed(key: key);
+
+final isCustomClient = bind.isCustomClient();
+get defaultOptionLang => isCustomClient ? 'default' : '';
+get defaultOptionTheme => isCustomClient ? 'system' : '';
+get defaultOptionYes => isCustomClient ? 'Y' : '';
+get defaultOptionNo => isCustomClient ? 'N' : '';
+get defaultOptionWhitelist => isCustomClient ? ',' : '';
+get defaultOptionAccessMode => isCustomClient ? 'custom' : '';
+get defaultOptionApproveMode => isCustomClient ? 'password-click' : '';
+
+// `setMovable()` is only supported on macOS.
+//
+// On macOS, the window can be dragged by the tab bar by default.
+// We need to disable the movable feature to prevent the window from being dragged by the tabs in the tab bar.
+//
+// When we drag the blank tab bar (not the tab), the window will be dragged normally by adding the `onPanStart` handle.
+//
+// See the following code for more details:
+// https://github.com/rustdesk/rustdesk/blob/ce1dac3b8613596b4d8ae981275f9335489eb935/flutter/lib/desktop/widgets/tabbar_widget.dart#L385
+// https://github.com/rustdesk/rustdesk/blob/ce1dac3b8613596b4d8ae981275f9335489eb935/flutter/lib/desktop/widgets/tabbar_widget.dart#L399
+//
+// @platforms macos
+disableWindowMovable(int? windowId) {
+  if (!isMacOS) {
+    return;
+  }
+
+  if (windowId == null) {
+    windowManager.setMovable(false);
+  } else {
+    WindowController.fromWindowId(windowId).setMovable(false);
+  }
 }
