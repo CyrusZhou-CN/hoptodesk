@@ -20,3 +20,5 @@ key.properties
 libsciter-gtk.so
 fleet.toml
 config.toml
+/flatpak/com.hoptodesk.json
+/flatpak/xdotool.json
