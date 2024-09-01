@@ -1,5 +1,4 @@
 mod keyboard;
-#[cfg(not(any(target_os = "ios")))]
 /// cbindgen:ignore
 pub mod platform;
 mod rendezvous_ws;
@@ -13,7 +12,6 @@ mod server;
 #[cfg(not(any(target_os = "ios")))]
 pub use self::server::*;
 mod client;
-#[cfg(not(any(target_os = "ios")))]
 mod lan;
 #[cfg(not(any(target_os = "ios")))]
 mod rendezvous_mediator;
@@ -53,6 +51,7 @@ mod clipboard;
 #[cfg(all(feature = "flutter", feature = "plugin_framework"))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod plugin;
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
 

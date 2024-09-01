@@ -1,5 +1,5 @@
 use std::{
-    borrow::Cow,
+    //borrow::Cow,
     //collections::HashMap,
     future::Future,
     sync::{Arc, Mutex, RwLock},
@@ -7,11 +7,10 @@ use std::{
 };
 
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use hbb_common::compress::decompress;
 use hbb_common::{
     allow_err,
     bail, base64,
+    bytes::Bytes,
     compress::compress as compress_func,
     futures_util::future::poll_fn,
     config::{Config, RENDEZVOUS_TIMEOUT}, log,
@@ -66,11 +65,7 @@ pub mod input {
 }
 
 lazy_static::lazy_static! {
-    pub static ref CONTENT: Arc<Mutex<String>> = Default::default();
     pub static ref SOFTWARE_UPDATE_URL: Arc<Mutex<String>> = Default::default();
-}
-
-lazy_static::lazy_static! {
     pub static ref DEVICE_ID: Arc<Mutex<String>> = Default::default();
     pub static ref DEVICE_NAME: Arc<Mutex<String>> = Default::default();
 }
@@ -81,11 +76,6 @@ lazy_static::lazy_static! {
     // Is server logic running. The server code can invoked to run by the main process if --server is not running.
     static ref SERVER_RUNNING: Arc<RwLock<bool>> = Default::default();
     static ref IS_MAIN: bool = std::env::args().nth(1).map_or(true, |arg| !arg.starts_with("--"));
-}
-
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-lazy_static::lazy_static! {
-    static ref ARBOARD_MTX: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
 }
 
 pub struct SimpleCallOnReturn {
@@ -1274,12 +1264,17 @@ pub fn read_custom_client(config: &str) {
     for s in config::keys::KEYS_SETTINGS {
         map_settings.insert(s.replace("_", "-"), s);
     }
+    let mut buildin_settings = HashMap::new();
+    for s in config::keys::KEYS_BUILDIN_SETTINGS {
+        buildin_settings.insert(s.replace("_", "-"), s);
+    }
     if let Some(default_settings) = data.remove("default-settings") {
         read_custom_client_advanced_settings(
             default_settings,
             &map_display_settings,
             &map_local_settings,
             &map_settings,
+            &buildin_settings,
             false,
         );
     }
@@ -1289,6 +1284,7 @@ pub fn read_custom_client(config: &str) {
             &map_display_settings,
             &map_local_settings,
             &map_settings,
+            &buildin_settings,
             true,
         );
     }
@@ -1309,6 +1305,15 @@ pub fn is_empty_uni_link(arg: &str) -> bool {
         return false;
     }
     arg[prefix.len()..].chars().all(|c| c == '/')
+}
+
+pub fn get_hwid() -> Bytes {
+    use sha2::{Digest, Sha256};
+
+    let uuid = hbb_common::get_uuid();
+    let mut hasher = Sha256::new();
+    hasher.update(&uuid);
+    Bytes::from(hasher.finalize().to_vec())
 }
 
 #[cfg(test)]

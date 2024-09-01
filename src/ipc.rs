@@ -1,10 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::atomic::{AtomicBool, Ordering},
-};
-#[cfg(not(windows))]
-use std::{fs::File, io::prelude::*};
-
 use crate::{
     privacy_mode::PrivacyModeState,
     ui_interface::{get_local_option, set_local_option},
@@ -14,6 +7,12 @@ use parity_tokio_ipc::{
     Connection as Conn, ConnectionClient as ConnClient, Endpoint, Incoming, SecurityAttributes,
 };
 use serde_derive::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicBool, Ordering},
+};
+#[cfg(not(windows))]
+use std::{fs::File, io::prelude::*};
 
 #[cfg(all(feature = "flutter", feature = "plugin_framework"))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -32,7 +31,6 @@ use hbb_common::{
     ResultType,
 };
 
-//use crate::rendezvous_mediator::RendezvousMediator;
 use crate::{common::is_server, privacy_mode, rendezvous_mediator::RendezvousMediator};
 
 // IPC actions here.
@@ -99,6 +97,25 @@ pub enum FS {
         last_modified: u64,
         is_upload: bool,
     },
+    Rename {
+        id: i32,
+        path: String,
+        new_name: String,
+    },
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "t")]
+pub struct ClipboardNonFile {
+    pub compress: bool,
+    pub content: bytes::Bytes,
+    pub content_len: usize,
+    pub next_raw: bool,
+    pub width: i32,
+    pub height: i32,
+    // message.proto: ClipboardFormat
+    pub format: i32,
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -217,6 +234,8 @@ pub enum Data {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
+    #[cfg(target_os = "windows")]
+    ClipboardNonFile(Option<(String, Vec<ClipboardNonFile>)>),
     PrivacyModeState((i32, PrivacyModeState, String)),
     TestRendezvousServer,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -252,6 +271,8 @@ pub enum Data {
     // Although the key is not neccessary, it is used to avoid hardcoding the key.
     WaylandScreencastRestoreToken((String, String)),
     HwCodecConfig(Option<String>),
+    RemoveTrustedDevices(Vec<Bytes>),
+    ClearTrustedDevices,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -318,7 +339,7 @@ pub async fn new_listener(postfix: &str) -> ResultType<Incoming> {
     }
 }
 
-pub struct CheckIfRestart(String, Option<Vec<String>>, String);
+pub struct CheckIfRestart(String, Option<Vec<String>>, String, String);
 
 impl CheckIfRestart {
     pub async fn new() -> Self {
@@ -326,6 +347,7 @@ impl CheckIfRestart {
             Config::get_option("stop-service"),
             Config::get_rendezvous_servers().await,
             Config::get_option("audio-input"),
+            Config::get_option("voice-call-input"),
         )
     }
 
@@ -337,6 +359,12 @@ impl CheckIfRestart {
         }
         if self.2 != Config::get_option("audio-input") {
             crate::audio_service::restart();
+        }
+        if self.3 != Config::get_option("voice-call-input") {
+            crate::audio_service::set_voice_call_input_device(
+                Some(Config::get_option("voice-call-input")),
+                true,
+            )
         }
     }
 }
@@ -465,8 +493,14 @@ async fn handle(data: Data, stream: &mut Connection) {
                         .and_then(|v| Some(v.join(",")));
                 } else if name == "hide_cm" {
                     value = None;
+                } else if name == "voice-call-input" {
+                    value = crate::audio_service::get_voice_call_input_device();
                 } else if name == "custom-api-url" {
                     value = Some(get_option_async(&name).await)
+                } else if name == "unlock-pin" {
+                    value = Some(Config::get_unlock_pin());
+                } else if name == "trusted-devices" {
+                    value = Some(Config::get_trusted_devices_json());
                 } else {
                     value = None;
                 }
@@ -482,6 +516,10 @@ async fn handle(data: Data, stream: &mut Connection) {
                     Config::set_permanent_password(&value);
                 } else if name == "salt" {
                     Config::set_salt(&value);
+                } else if name == "voice-call-input" {
+                    crate::audio_service::set_voice_call_input_device(Some(value), true);
+                } else if name == "unlock-pin" {
+                    Config::set_unlock_pin(&value);
                 } else if name == "password-file-transfer" {
                     password::update_file_transfer_password(value.clone());
                 } else if name == "custom-api-url" {
@@ -573,12 +611,12 @@ async fn handle(data: Data, stream: &mut Connection) {
             );
         }
         #[cfg(feature = "hwcodec")]
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         Data::CheckHwcodec => {
             scrap::hwcodec::start_check_process();
         }
         #[cfg(feature = "hwcodec")]
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         Data::HwCodecConfig(c) => {
             match c {
                 None => {
@@ -629,6 +667,12 @@ async fn handle(data: Data, stream: &mut Connection) {
                         .await
                 );
             }
+        }
+        Data::RemoveTrustedDevices(v) => {
+            Config::remove_trusted_devices(&v);
+        }
+        Data::ClearTrustedDevices => {
+            Config::clear_trusted_devices();
         }
         _ => {}
     }
@@ -891,6 +935,61 @@ pub fn set_password_for_file_transfer(v: String, id: String) -> ResultType<()> {
     set_config("password-file-transfer", format!("{}:{}", id, v))
 }
 
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn set_unlock_pin(v: String, translate: bool) -> ResultType<()> {
+    let v = v.trim().to_owned();
+    let min_len = 4;
+    if !v.is_empty() && v.len() < min_len {
+        let err = if translate {
+            crate::lang::translate(
+                "Requires at least {".to_string() + &format!("{min_len}") + "} characters",
+            )
+        } else {
+            // Sometimes, translated can't show normally in command line
+            format!("Requires at least {} characters", min_len)
+        };
+        bail!(err);
+    }
+    Config::set_unlock_pin(&v);
+    set_config("unlock-pin", v)
+}
+
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn get_unlock_pin() -> String {
+    if let Ok(Some(v)) = get_config("unlock-pin") {
+        Config::set_unlock_pin(&v);
+        v
+    } else {
+        Config::get_unlock_pin()
+    }
+}
+
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn get_trusted_devices() -> String {
+    if let Ok(Some(v)) = get_config("trusted-devices") {
+        v
+    } else {
+        Config::get_trusted_devices_json()
+    }
+}
+
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn remove_trusted_devices(hwids: Vec<Bytes>) {
+    Config::remove_trusted_devices(&hwids);
+    allow_err!(set_data(&Data::RemoveTrustedDevices(hwids)));
+}
+
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn clear_trusted_devices() {
+    Config::clear_trusted_devices();
+    allow_err!(set_data(&Data::ClearTrustedDevices));
+}
+
 pub fn get_id() -> String {
     if let Ok(Some(v)) = get_config("id") {
         // update salt also, so that next time reinstallation not causing first-time auto-login failure
@@ -1071,7 +1170,6 @@ pub async fn connect_to_user_session(usid: Option<u32>) -> ResultType<()> {
     Ok(())
 }
 
-
 #[tokio::main(flavor = "current_thread")]
 pub async fn notify_server_to_check_hwcodec() -> ResultType<()> {
     connect(1_000, "").await?.send(&&Data::CheckHwcodec).await?;
@@ -1079,7 +1177,7 @@ pub async fn notify_server_to_check_hwcodec() -> ResultType<()> {
 }
 
 #[cfg(feature = "hwcodec")]
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tokio::main(flavor = "current_thread")]
 pub async fn get_hwcodec_config_from_server() -> ResultType<()> {
     if !scrap::codec::enable_hwcodec_option() || scrap::hwcodec::HwCodecConfig::already_set() {
@@ -1102,7 +1200,7 @@ pub async fn get_hwcodec_config_from_server() -> ResultType<()> {
 }
 
 #[cfg(feature = "hwcodec")]
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn client_get_hwcodec_config_thread(wait_sec: u64) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     if !crate::platform::is_installed()

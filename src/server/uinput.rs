@@ -4,7 +4,11 @@ use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     AttributeSet, EventType, InputEvent,
 };
-use hbb_common::{allow_err, bail, log, tokio::{self, runtime::Runtime}, ResultType};
+use hbb_common::{
+    allow_err, bail, log,
+    tokio::{self, runtime::Runtime},
+    ResultType,
+};
 
 static IPC_CONN_TIMEOUT: u64 = 1000;
 static IPC_REQUEST_TIMEOUT: u64 = 1000;
@@ -34,7 +38,10 @@ pub mod client {
         fn send_get_key_state(&mut self, data: Data) -> ResultType<bool> {
             self.rt.block_on(self.conn.send(&data))?;
 
-            match self.rt.block_on(self.conn.next_timeout(IPC_REQUEST_TIMEOUT)) {
+            match self
+                .rt
+                .block_on(self.conn.next_timeout(IPC_REQUEST_TIMEOUT))
+            {
                 Ok(Some(Data::KeyboardResponse(ipc::DataKeyboardResponse::GetKeyState(state)))) => {
                     Ok(state)
                 }

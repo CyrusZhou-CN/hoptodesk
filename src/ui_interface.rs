@@ -2,6 +2,7 @@
 use hbb_common::password_security;
 use hbb_common::{
     allow_err,
+    bytes::Bytes,
     config::{self, Config, LocalConfig, PeerConfig},
     directories_next, 
     log, 
@@ -201,12 +202,23 @@ pub fn get_local_option(key: String) -> String {
     LocalConfig::get_option(&key)
 }
 
+#[cfg(feature = "flutter")]
 #[inline]
 pub fn get_hard_option(key: String) -> String {
     config::HARD_SETTINGS
         .read()
         .unwrap()
         .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[inline]
+pub fn get_builtin_option(key: &str) -> String {
+    config::BUILTIN_SETTINGS
+        .read()
+        .unwrap()
+        .get(key)
         .cloned()
         .unwrap_or_default()
 }
@@ -714,7 +726,6 @@ pub fn create_shortcut(_id: String) {
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 #[inline]
 pub fn discover() {
-    #[cfg(not(any(target_os = "ios")))]
     std::thread::spawn(move || {
         allow_err!(crate::lan::discover());
     });
@@ -1438,7 +1449,7 @@ pub fn verify_bot(token: String) -> String {
 
 pub fn check_hwcodec() {
     #[cfg(feature = "hwcodec")]
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use std::sync::Once;
         static ONCE: Once = Once::new();
@@ -1452,4 +1463,49 @@ pub fn check_hwcodec() {
             }
         })
     }
+}
+
+
+#[cfg(feature = "flutter")]
+pub fn get_unlock_pin() -> String {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return String::default();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return ipc::get_unlock_pin();
+}
+
+#[cfg(feature = "flutter")]
+pub fn set_unlock_pin(pin: String) -> String {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return String::default();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    match ipc::set_unlock_pin(pin, true) {
+        Ok(_) => String::default(),
+        Err(err) => err.to_string(),
+    }
+}
+
+#[cfg(feature = "flutter")]
+pub fn get_trusted_devices() -> String {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return Config::get_trusted_devices_json();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return ipc::get_trusted_devices();
+}
+
+#[cfg(feature = "flutter")]
+pub fn remove_trusted_devices(json: &str) {
+    let hwids = serde_json::from_str::<Vec<Bytes>>(json).unwrap_or_default();
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    Config::remove_trusted_devices(&hwids);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    ipc::remove_trusted_devices(hwids);
+}
+
+#[cfg(feature = "flutter")]
+pub fn clear_trusted_devices() {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    Config::clear_trusted_devices();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    ipc::clear_trusted_devices();
 }

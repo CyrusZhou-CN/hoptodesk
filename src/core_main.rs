@@ -296,12 +296,19 @@ pub fn core_main() -> Option<Vec<String>> {
 					log::info!("ID changed.");
 				}
 			}
+        } else if args[0] == "--remoteupdate" {
+			let mut remoteupdate_arg = vec![String::from("--remoteupdate")];
+			log::info!("Run with --remoteupdate");
+			// Pass a mutable slice of the Vec to the start function
+			crate::ui::start(&mut remoteupdate_arg);
 			std::process::exit(0);
-        } else if args[0] == "--update" {
-		    let exe_path = std::env::current_exe().expect("Failed to get current executable path");
+        } else if args[0] == "--update" || args[0] == "--updatefromremote" {
+		    log::info!("Updating from --update");
+			let exe_path = std::env::current_exe().expect("Failed to get current executable path");
 		    #[cfg(windows)]
 		    if let Ok(_metadata) = fs::metadata(Config::path("UpdatePath.toml")) {
-		        let lastpath = std::fs::read_to_string(Config::path("UpdatePath.toml")).unwrap_or_else(|err| {
+		        log::info!("UpdatePath found");
+				let lastpath = std::fs::read_to_string(Config::path("UpdatePath.toml")).unwrap_or_else(|err| {
 		            log::error!(
 		                "Error reading file: {:?}({})",
 		                Config::path("UpdatePath.toml").to_str(),
@@ -335,21 +342,28 @@ pub fn core_main() -> Option<Vec<String>> {
 		
 		            std::thread::sleep(std::time::Duration::from_secs(1));
 		            let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
-		        }
+		        } else {
+					log::info!("Updating exe... not installed.");
+					if let Err(err) = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", "HopToDesk")) {
+						log::error!("Failed to kill task: HopToDesk. Error: {}", err);
+					} else {
+						if let Err(err) = fs::remove_file(&lastpath) {
+							log::error!("Failed to remove file: {}. Error: {}", lastpath, err);
+						} else {
+							log::info!("Removed old version {}", lastpath);
+						}
 		
-		        if crate::platform::is_installed() {
-		            if let Err(err) = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", "HopToDesk")) {
-		                log::error!("Failed to kill task: HopToDesk. Error: {}", err);
-		            } else {
-		                if let Err(err) = fs::remove_file(&lastpath) {
-		                    log::error!("Failed to remove file: {}. Error: {}", lastpath, err);
-		                }
-		
-		                if let Err(err) = fs::copy(&exe_path, &lastpath) {
-		                    log::error!("Failed to copy file to last path: {}. Error: {}", lastpath, err);
-		                }
-		            }
-		
+						if let Err(err) = fs::copy(&exe_path, &lastpath) {
+							log::error!("Failed to copy file to last path: {}. Error: {}", lastpath, err);
+						} else {
+							log::info!("Copied new version from {:?} to {:?}", exe_path, lastpath);
+						}
+						log::info!("Running new version {}", lastpath);
+						let _ = crate::platform::windows::run_uac(&lastpath, "");
+					}
+				}
+				
+		        if crate::platform::is_installed() {		
 		            let _ = crate::platform::windows::run_uac_hide("sc", "start HopToDesk");
 		        }
 		

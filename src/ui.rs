@@ -54,6 +54,8 @@ static DLL_BYTESPM: &[u8] = include_bytes!("../../PrivacyMode.dll");
 #[cfg(feature = "standalone")]
 static DLL_BYTESPH: &[u8] = include_bytes!("../../privacyhelper.exe");
 
+//struct UI;
+struct UI {}
 
 pub fn start(args: &mut [String]) {
     #[cfg(all(feature = "standalone", target_os = "windows"))]
@@ -145,7 +147,7 @@ pub fn start(args: &mut [String]) {
     }
     let args_string = args.concat().replace("\"", "").replace("[", "").replace("]", "");
 	
-	if args.is_empty() || args_string.is_empty() {
+	if args.is_empty() || args_string.is_empty() || args[0] == "--qs" {
 		//let children: Children = Default::default();
         //std::thread::spawn(move || check_zombie(children));
         std::thread::spawn(move || check_zombie());
@@ -156,6 +158,18 @@ pub fn start(args: &mut [String]) {
         // Start pulse audio local server.
         #[cfg(target_os = "linux")]
         std::thread::spawn(crate::ipc::start_pa);
+    } else if args[0] == "--remoteupdate" {
+		frame.event_handler(UI {});
+        frame.sciter_handler(UIHostHandler {});
+        page = "install.html";
+        if std::env::var("ProgramFiles").map_or(false, |pf| pf.contains("WindowsApps")) {
+            return;
+        } else if get_version_number(crate::VERSION) < get_version_number(&Config::get_option("api_version")) {
+			let ui_instance = UI {};
+			ui_instance.run_temp_update();
+			return;
+		}
+		std::process::exit(0);
     } else if args[0] == "--install" {
         frame.event_handler(UI {});
         frame.sciter_handler(UIHostHandler {});
@@ -265,7 +279,7 @@ pub fn start(args: &mut [String]) {
             .unwrap_or("".to_owned()),
         page
     ));
-    frame.run_app();
+	frame.run_app();
 }
 
 #[cfg(feature = "standalone")]
@@ -284,7 +298,7 @@ pub fn get_dllph_bytes() -> &'static [u8] {
 }	
 
 
-struct UI {}
+//struct UI {}
 
 impl UI {
     fn recent_sessions_updated(&self) -> bool {
@@ -421,8 +435,20 @@ impl UI {
     }
 
     fn requires_update(&self) -> bool {
-        //log::info!("from config {} Vs from wire {}", crate::VERSION, Config::get_option("api_version"));
+        // Check if running from the Microsoft Store
+        if std::env::var("ProgramFiles").map_or(false, |pf| pf.contains("WindowsApps")) {
+            return false; // Return false if running from the Microsoft Store
+        }
+        //log::info!("from config {} Vs from wire {}", crate::VERSION, Config::get_option("api_version"));		
         get_version_number(crate::VERSION) < get_version_number(&Config::get_option("api_version"))
+    }
+
+    fn running_qs(&self) -> bool {
+		if env::args().any(|arg| arg == "--qs") {
+			true
+		} else {
+			false
+		}
     }
 	
 	fn copy_text(&self, text: String) {
@@ -689,7 +715,7 @@ impl UI {
 			tempexepath.push("HopToDesk-update.exe");
 			log::info!("Saving update to: {:?}", tempexepath);
 			let random_value = rand::random::<u64>().to_string();
-			let url = format!("https://www.hoptodesk.com/update-windows?update={}", random_value);
+			let url = format!("https://www.hoptodesk.com/update-windows-debug2?update={}", random_value);
 			let rt = Runtime::new().unwrap();
 			rt.block_on(async {
 				log::info!("Downloading update...");
@@ -702,13 +728,23 @@ impl UI {
 		
 			log::info!("Running update: {:?}", tempexepath.clone());
 			let runuac = tempexepath.clone();
-			if let Err(err) = crate::platform::windows::run_uac_hide(runuac.to_str().expect("Failed to convert executable path to string"), "--update") {
+			//let _ = crate::platform::windows::run_uac_hide("taskkill", &format!("/F /IM {:?}.exe", "HopToDesk"));
+			let mut update_arg = if env::args().any(|arg| arg == "") {
+				"--update"
+			} else {
+				"--updatefromremote"
+			};
+			
+			if let Err(err) = crate::platform::windows::run_uac_hide(runuac.to_str().expect("Failed to convert executable path to string"), update_arg) {
 				log::info!("UAC Run Error: {:?}", err);
 			} else {
-				log::info!("UAC Run success");
+				log::info!("UAC Run success: {:?}", update_arg);
 			}
-		
-			std::process::exit(0);
+
+			let args: Vec<String> = env::args().collect();
+			if args.len() <= 1 || args[1] != "--remoteupdate" {
+				std::process::exit(0);
+			}
 		}
     }
 	
@@ -811,7 +847,11 @@ impl UI {
         );
         format!("data:image/png;base64,{s}")
     }
-                
+
+    pub fn check_hwcodec(&self) {
+        check_hwcodec()
+    }
+                    
     fn get_custom_api_url(&self) -> String {
         if let Ok(Some(v)) = ipc::get_config("custom-api-url") {
             v
@@ -921,7 +961,9 @@ impl sciter::EventHandler for UI {
         fn generate2fa();
         fn generate_2fa_img_src(String);
         fn verify2fa(String);
+        fn check_hwcodec();        
         fn requires_update();
+        fn running_qs();		
 		fn set_version_sync();
 		fn copy_text(String);
         fn get_config_option(String);

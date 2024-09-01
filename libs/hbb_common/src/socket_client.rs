@@ -107,7 +107,8 @@ pub async fn connect_tcp_local<
     ms_timeout: u64,
 ) -> ResultType<FramedStream> {
     if let Some(conf) = Config::get_socks() {
-        return FramedStream::connect(
+		log::info!("Connecting via SOCKS proxy");
+		return FramedStream::connect(
             conf.proxy.as_str(),
             target,
             local,
@@ -117,15 +118,17 @@ pub async fn connect_tcp_local<
         )
         .await;
     }
+
     if let Some(target) = target.resolve() {
-        if let Some(local) = local {
+        log::info!("Connecting via relay without proxy");
+		if let Some(local) = local {
             if local.is_ipv6() && target.is_ipv4() {
                 let target = query_nip_io(target).await?;
                 return FramedStream::new(target, Some(local), ms_timeout).await;
             }
         }
     }
-    FramedStream::new(target, local, ms_timeout).await
+	FramedStream::new(target, local, ms_timeout).await
 }
 
 #[inline]

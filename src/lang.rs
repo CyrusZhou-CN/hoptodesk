@@ -41,7 +41,7 @@ mod sv;
 mod th;
 mod tr;
 mod tw;
-mod ua;
+mod uk;
 mod vn;
 
 
@@ -78,7 +78,7 @@ lazy_static::lazy_static! {
             ("el", "Ελληνικά"),
             ("tr", "Türkçe"),
             ("ru", "Русский"),
-            ("ua", "Українська"),
+            ("uk", "Українська"),
             ("kz", "Қазақ"),
             ("ar", "العربية"),
             ("he", "עברית"),
@@ -148,7 +148,7 @@ pub fn translate_locale(name: String, locale: &str) -> String {
         "ja" => ja::T.deref(),
         "ko" => ko::T.deref(),
         "kz" => kz::T.deref(),
-        "ua" => ua::T.deref(),
+        "uk" => uk::T.deref(),
         "fa" => fa::T.deref(),
         "ca" => ca::T.deref(),
         "el" => el::T.deref(),		

@@ -50,7 +50,7 @@ impl TOTPInfo {
         };
         Ok(totp)
     }
-
+	
     pub fn into_string(&self) -> ResultType<String> {
         let secret = encrypt_vec_or_original(self.secret.as_slice(), "00", 1024);
         let totp_info = TOTPInfo {
@@ -120,7 +120,8 @@ pub struct TelegramBot {
 }
 
 impl TelegramBot {
-    fn into_string(&self) -> ResultType<String> {
+    #[cfg(feature = "flutter")]
+	fn into_string(&self) -> ResultType<String> {
         let token = encrypt_vec_or_original(self.token_str.as_bytes(), "00", 1024);
         let bot = TelegramBot {
             token,
@@ -129,7 +130,7 @@ impl TelegramBot {
         let s = serde_json::to_string(&bot)?;
         Ok(s)
     }
-
+	#[cfg(feature = "flutter")]
     fn save(&self) -> ResultType<()> {
         let s = self.into_string()?;
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -166,9 +167,7 @@ pub async fn send_2fa_code_to_telegram(text: &str, bot: TelegramBot) -> ResultTy
 pub fn get_chatid_telegram(bot_token: &str) -> ResultType<Option<String>> {
     let url = format!("https://api.telegram.org/bot{}/getUpdates", bot_token);
     // because caller is in tokio runtime, so we must call post_request_sync in new thread.
-    let handle = std::thread::spawn(move || {
-        crate::post_request_sync(url, "".to_owned(), "")
-    });
+    let handle = std::thread::spawn(move || crate::post_request_sync(url, "".to_owned(), ""));
     let resp = handle.join().map_err(|_| anyhow!("Thread panicked"))??;
     let value = serde_json::from_str::<serde_json::Value>(&resp).map_err(|e| anyhow!(e))?;
 

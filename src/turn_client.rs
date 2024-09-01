@@ -57,6 +57,13 @@ async fn get_turn_servers() -> Option<Vec<TurnConfig>> {
                 password: server["password"].as_str()?.to_string(),
                 tls_config: None,
             });
+        } else if server["protocol"].as_str()? == "stun" {
+            servers.push(TurnConfig {
+                addr: format!("{}:{}", server["host"].as_str()?, server["port"].as_str()?),
+                username: server["username"].as_str()?.to_string(),
+                password: server["password"].as_str()?.to_string(),
+                tls_config: None,
+            });			
         } else if server["protocol"].as_str()? == "turn-tls" {
             servers.push(TurnConfig {
                 addr: format!("{}:{}", server["host"].as_str()?, server["port"].as_str()?),

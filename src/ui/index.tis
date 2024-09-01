@@ -5,6 +5,18 @@ if (is_osx) view.windowBlurbehind = #light;
 // html min-width, min-height not working on mac, below works for all
 view.windowMinSize = (scaleIt(560), scaleIt(300));
 
+function setQS() {
+	var isquicksupport = handler.get_option('quicksupport') || handler.running_qs();
+	
+	if (isquicksupport) {
+		view.windowMinSize = (scaleIt(250), scaleIt(300));
+		view.windowResizable = false;
+		view.windowMaximizable = false;
+	}
+}
+
+setQS();
+
 var app;
 var tmp = handler.get_connect_status();
 var connect_status = tmp[0];
@@ -674,8 +686,10 @@ class App: Reactor.Component
 
     function render() {
         var is_can_screen_recording = handler.is_can_screen_recording(false);
+		var isquicksupport = handler.get_option('quicksupport') || handler.running_qs();
+		
         return
-            <div .app>
+            <div .app style={isquicksupport ? "width:250px" : ""}>
                     <popup><menu.context #edit-password-context tabindex="0">
                         <li #refresh-password title={translate('Refresh random password')}>{translate('Refresh random password')}</li>
                         <li #set-password title={translate('Set your own password')}>{translate('Set your own password')}</li>
@@ -1293,6 +1307,14 @@ function self.ready() {
     } else {
 		centerize(scaleIt(800), scaleIt(600));
     }
+
+	var isquicksupport = handler.get_option('quicksupport') || handler.running_qs();
+	if (isquicksupport) {
+		centerize(scaleIt(200), scaleIt(600));
+		view.windowResizable = false;
+		view.windowMaximizable = false;
+	}
+	
     if (!handler.get_remote_id()) {
         view.focus = $(#remote_id);
     }
@@ -1319,11 +1341,6 @@ function showAbout() {
 function showSettings() {
 	if ($(#overlay).style#display == 'block') return;
     myIdMenu.showSettingMenu();
-}
-
-if (handler.requires_update()) {
-	//var el = $(#launch-update);
-	//el.style.set{display: "inline-block"};
 }
 
 function showUpdatePopup() {

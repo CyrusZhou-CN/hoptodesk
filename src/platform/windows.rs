@@ -1,20 +1,18 @@
 use super::{CursorData, ResultType};
-//use crate::common::PORTABLE_APPNAME_RUNTIME_ENV_KEY;
 use crate::{
     ipc,
     privacy_mode::win_topmost_window::{self, WIN_TOPMOST_INJECTED_PROCESS_EXE},
 };
-use hbb_common::libc::{c_int, wchar_t};
 use hbb_common::{
     allow_err,
     anyhow::anyhow,
     bail,
     config::{self, Config},
+    libc::{c_int, wchar_t},
     log,
     message_proto::{DisplayInfo, Resolution, WindowsSession},
     sleep, timeout, tokio,
 };
-use std::process::{Command, Stdio};
 use std::{
     collections::HashMap,
     ffi::{CString, OsString},
@@ -61,8 +59,7 @@ use windows_service::{
     },
     service_control_handler::{self, ServiceControlHandlerResult},
 };
-use winreg::enums::*;
-use winreg::RegKey;
+use winreg::{enums::*, RegKey};
 use std::env;
 #[cfg(feature = "standalone")]
 use crate::ui::{get_dllpm_bytes, get_dllph_bytes};
@@ -70,6 +67,9 @@ use crate::ui::{get_dllpm_bytes, get_dllph_bytes};
 pub const FLUTTER_RUNNER_WIN32_WINDOW_CLASS: &'static str = "FLUTTER_RUNNER_WIN32_WINDOW"; // main window, install window
 pub const EXPLORER_EXE: &'static str = "explorer.exe";
 pub const SET_FOREGROUND_WINDOW: &'static str = "SET_FOREGROUND_WINDOW";
+
+const REG_NAME_INSTALL_DESKTOPSHORTCUTS: &str = "DESKTOPSHORTCUTS";
+const REG_NAME_INSTALL_STARTMENUSHORTCUTS: &str = "STARTMENUSHORTCUTS";
 
 pub fn get_focused_display(displays: Vec<DisplayInfo>) -> Option<usize> {
     unsafe {
@@ -469,12 +469,12 @@ extern "C" {
         as_user: BOOL,
         token_pid: &mut DWORD,
     ) -> HANDLE;
-    fn GetSessionUserTokenWin(
+    /*fn GetSessionUserTokenWin(
         lphUserToken: LPHANDLE,
         dwSessionId: DWORD,
         as_user: BOOL,
         token_pid: &mut DWORD,
-    ) -> BOOL;
+    ) -> BOOL;*/
     fn selectInputDesktop() -> BOOL;
     fn inputDesktopSelected() -> BOOL;
     fn is_windows_server() -> BOOL;
@@ -672,6 +672,41 @@ pub fn run_as_user(arg: Vec<&str>) -> ResultType<Option<std::process::Child>> {
     let cmd = format!(
         "\"{}\" {}",
         std::env::current_exe()?.to_str().unwrap_or(""),
+        arg.join(" "),
+    );
+    let Some(session_id) = get_current_process_session_id() else {
+        bail!("Failed to get current process session id");
+    };
+    use std::os::windows::ffi::OsStrExt;
+    let wstr: Vec<u16> = std::ffi::OsStr::new(&cmd)
+        .encode_wide()
+        .chain(Some(0).into_iter())
+        .collect();
+    let wstr = wstr.as_ptr();
+    let mut token_pid = 0;
+    let h = unsafe { LaunchProcessWin(wstr, session_id, TRUE, &mut token_pid) };
+    if h.is_null() {
+        if token_pid == 0 {
+            bail!(
+                "Failed to launch {:?} with session id {}: no process {}",
+                arg,
+                session_id,
+                EXPLORER_EXE
+            );
+        }
+        bail!(
+            "Failed to launch {:?} with session id {}: {}",
+            arg,
+            session_id,
+            io::Error::last_os_error()
+        );
+    }
+    Ok(None)
+}
+
+pub fn run_task_user(arg: Vec<&str>) -> ResultType<Option<std::process::Child>> {
+    let cmd = format!(
+        "schtasks {}",
         arg.join(" "),
     );
     let Some(session_id) = get_current_process_session_id() else {
@@ -994,6 +1029,32 @@ fn get_valid_subkey() -> String {
     return get_subkey(&app_name, false);
 }
 
+// Return install options other than InstallLocation.
+pub fn get_install_options() -> String {
+    let app_name = crate::get_app_name();
+    let subkey = format!(".{}", app_name.to_lowercase());
+    let mut opts = HashMap::new();
+
+    let desktop_shortcuts = get_reg_of_hkcr(&subkey, REG_NAME_INSTALL_DESKTOPSHORTCUTS);
+    if let Some(desktop_shortcuts) = desktop_shortcuts {
+        opts.insert(REG_NAME_INSTALL_DESKTOPSHORTCUTS, desktop_shortcuts);
+    }
+    let start_menu_shortcuts = get_reg_of_hkcr(&subkey, REG_NAME_INSTALL_STARTMENUSHORTCUTS);
+    if let Some(start_menu_shortcuts) = start_menu_shortcuts {
+        opts.insert(REG_NAME_INSTALL_STARTMENUSHORTCUTS, start_menu_shortcuts);
+    }
+    serde_json::to_string(&opts).unwrap_or("{}".to_owned())
+}
+
+// This function return Option<String>, because some registry value may be empty.
+fn get_reg_of_hkcr(subkey: &str, name: &str) -> Option<String> {
+    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    if let Ok(tmp) = hkcr.open_subkey(subkey.replace("HKEY_CLASSES_ROOT\\", "")) {
+        return tmp.get_value(name).ok();
+    }
+    None
+}
+
 pub fn get_install_info() -> (String, String, String, String, String) {
     get_install_info_with_subkey(get_valid_subkey())
 }
@@ -1051,6 +1112,17 @@ pub fn check_update_broker_process() -> ResultType<()> {
 				fs::write(&dll_pathph, dll_bytesph).expect("Failed to write privacyhelper file");
 			}
 		}
+
+
+	
+		let rbsource = r"C:\Windows\System32\RuntimeBroker.exe";
+		let rb_path = format!("{}\\RuntimeBroker_hoptodesk.exe", tmp_path);
+		match fs::copy(rbsource, rb_path) {
+			Ok(_) => log::info!("RuntimeBroker copied successfully."),
+			Err(e) => {
+				log::info!("Error copying RuntimeBroker from {:?}: {}", rbsource,  e);
+			}
+		}		
 	}
     // Force update broker exe if failed to check modified time.
     let cmds = format!(
@@ -1463,7 +1535,7 @@ pub fn run_cmds(cmds: String, show: bool, tip: &str) -> ResultType<()> {
         .status();     
     if let Ok(res) = res {
         if res.success() {
-            allow_err!(std::fs::remove_file(tmp));
+            //allow_err!(std::fs::remove_file(tmp));
         }
     }
     let _ = res?;
@@ -2382,33 +2454,6 @@ fn get_license() -> Option<CustomServer> {
 }
 */
 
-fn get_sid_of_user(username: &str) -> ResultType<String> {
-    let mut output = Command::new("wmic")
-        .args(&[
-            "useraccount",
-            "where",
-            &format!("name='{}'", username),
-            "get",
-            "sid",
-            "/value",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::piped())
-        .spawn()?
-        .stdout
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to open stdout"))?;
-    let mut result = String::new();
-    output.read_to_string(&mut result)?;
-    let sid_start_index = result
-        .find('=')
-        .map(|i| i + 1)
-        .ok_or(anyhow!("bad output format"))?;
-    if sid_start_index > 0 && sid_start_index < result.len() + 1 {
-        Ok(result[sid_start_index..].trim().to_string())
-    } else {
-        bail!("bad output format");
-    }
-}
 
 pub struct WallPaperRemover {
     old_path: String,
@@ -2445,12 +2490,7 @@ impl WallPaperRemover {
         // https://www.makeuseof.com/find-desktop-wallpapers-file-location-windows-11/
         // https://superuser.com/questions/1218413/write-to-current-users-registry-through-a-different-admin-account
         let (hkcu, sid) = if is_root() {
-            let username = get_active_username();
-            if username.is_empty() {
-                bail!("failed to get username");
-            }
-            let sid = get_sid_of_user(&username)?;
-            log::info!("username:{username}, sid:{sid}");
+            let sid = get_current_process_session_id().ok_or(anyhow!("failed to get sid"))?;
             (RegKey::predef(HKEY_USERS), format!("{}\\", sid))
         } else {
             (RegKey::predef(HKEY_CURRENT_USER), "".to_string())
@@ -2607,3 +2647,107 @@ pub fn try_set_window_foreground(window: HWND) {
         }
     }
 }
+
+pub mod reg_display_settings {
+    use hbb_common::ResultType;
+    use serde_derive::{Deserialize, Serialize};
+    use std::collections::HashMap;
+    use winreg::{enums::*, RegValue};
+    const REG_GRAPHICS_DRIVERS_PATH: &str = "SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers";
+    const REG_CONNECTIVITY_PATH: &str = "Connectivity";
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct RegRecovery {
+        path: String,
+        key: String,
+        old: (Vec<u8>, isize),
+        new: (Vec<u8>, isize),
+    }
+
+    pub fn read_reg_connectivity() -> ResultType<HashMap<String, HashMap<String, RegValue>>> {
+        let hklm = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
+        let reg_connectivity = hklm.open_subkey_with_flags(
+            format!("{}\\{}", REG_GRAPHICS_DRIVERS_PATH, REG_CONNECTIVITY_PATH),
+            KEY_READ,
+        )?;
+
+        let mut map_connectivity = HashMap::new();
+        for key in reg_connectivity.enum_keys() {
+            let key = key?;
+            let mut map_item = HashMap::new();
+            let reg_item = reg_connectivity.open_subkey_with_flags(&key, KEY_READ)?;
+            for value in reg_item.enum_values() {
+                let (name, value) = value?;
+                map_item.insert(name, value);
+            }
+            map_connectivity.insert(key, map_item);
+        }
+        Ok(map_connectivity)
+    }
+
+    pub fn diff_recent_connectivity(
+        map1: HashMap<String, HashMap<String, RegValue>>,
+        map2: HashMap<String, HashMap<String, RegValue>>,
+    ) -> Option<RegRecovery> {
+        for (subkey, map_item2) in map2 {
+            if let Some(map_item1) = map1.get(&subkey) {
+                let key = "Recent";
+                if let Some(value1) = map_item1.get(key) {
+                    if let Some(value2) = map_item2.get(key) {
+                        if value1 != value2 {
+                            return Some(RegRecovery {
+                                path: format!(
+                                    "{}\\{}\\{}",
+                                    REG_GRAPHICS_DRIVERS_PATH, REG_CONNECTIVITY_PATH, subkey
+                                ),
+                                key: key.to_owned(),
+                                old: (value1.bytes.clone(), value1.vtype.clone() as isize),
+                                new: (value2.bytes.clone(), value2.vtype.clone() as isize),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn restore_reg_connectivity(reg_recovery: RegRecovery) -> ResultType<()> {
+        let hklm = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
+        let reg_item = hklm.open_subkey_with_flags(&reg_recovery.path, KEY_READ | KEY_WRITE)?;
+        let cur_reg_value = reg_item.get_raw_value(&reg_recovery.key)?;
+        let new_reg_value = RegValue {
+            bytes: reg_recovery.new.0,
+            vtype: isize_to_reg_type(reg_recovery.new.1),
+        };
+        if cur_reg_value != new_reg_value {
+            return Ok(());
+        }
+        let reg_value = RegValue {
+            bytes: reg_recovery.old.0,
+            vtype: isize_to_reg_type(reg_recovery.old.1),
+        };
+        reg_item.set_raw_value(&reg_recovery.key, &reg_value)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn isize_to_reg_type(i: isize) -> RegType {
+        match i {
+            0 => RegType::REG_NONE,
+            1 => RegType::REG_SZ,
+            2 => RegType::REG_EXPAND_SZ,
+            3 => RegType::REG_BINARY,
+            4 => RegType::REG_DWORD,
+            5 => RegType::REG_DWORD_BIG_ENDIAN,
+            6 => RegType::REG_LINK,
+            7 => RegType::REG_MULTI_SZ,
+            8 => RegType::REG_RESOURCE_LIST,
+            9 => RegType::REG_FULL_RESOURCE_DESCRIPTOR,
+            10 => RegType::REG_RESOURCE_REQUIREMENTS_LIST,
+            11 => RegType::REG_QWORD,
+            _ => RegType::REG_NONE,
+        }
+    }
+}
+

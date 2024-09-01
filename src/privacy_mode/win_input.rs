@@ -76,16 +76,15 @@ fn do_hook(tx: Sender<String>) -> ResultType<(HHOOK, HHOOK)> {
         }
 
         let hook_mouse = SetWindowsHookExA(WH_MOUSE_LL, Some(privacy_mode_hook_mouse), hm_mouse, 0);
-		//let hook_mouse = std::ptr::null_mut();
         if hook_mouse.is_null() {
-			if FALSE == UnhookWindowsHookEx(hook_keyboard) {
+            if FALSE == UnhookWindowsHookEx(hook_keyboard) {
                 // Fatal error
                 log::error!(
                     " UnhookWindowsHookEx keyboard, error {}",
                     Error::last_os_error()
                 );
             }
-			tx.send(format!(
+            tx.send(format!(
                 " SetWindowsHookExA mouse, error {}",
                 Error::last_os_error()
             ))?;
@@ -94,7 +93,7 @@ fn do_hook(tx: Sender<String>) -> ResultType<(HHOOK, HHOOK)> {
 
         *cur_hook_thread_id = GetCurrentThreadId();
         tx.send("".to_owned())?;
-		return Ok((hook_keyboard, hook_mouse));
+        return Ok((hook_keyboard, hook_mouse));
     }
 }
 
@@ -204,7 +203,7 @@ pub extern "system" fn privacy_mode_hook_keyboard(
     let w_param2 = w_param as UINT;
 
     unsafe {
-		if (*ks).dwExtraInfo != enigo::ENIGO_INPUT_EXTRA_VALUE {
+        if (*ks).dwExtraInfo != enigo::ENIGO_INPUT_EXTRA_VALUE {
             // Disable alt key. Alt + Tab will switch windows.
             if (*ks).flags & LLKHF_ALTDOWN == LLKHF_ALTDOWN {
                 return 1;
@@ -214,7 +213,7 @@ pub extern "system" fn privacy_mode_hook_keyboard(
                 WM_KEYDOWN => {
                     // Disable all keys other than P and Ctrl.
                     if ![80, 162, 163].contains(&(*ks).vkCode) {
-						return 1;
+                        return 1;
                     }
 
                     // NOTE: GetKeyboardState may not work well...
@@ -250,31 +249,19 @@ pub extern "system" fn privacy_mode_hook_mouse(
     w_param: WPARAM,
     l_param: LPARAM,
 ) -> LRESULT {
-	if code < 0 {
+    if code < 0 {
         unsafe {
             return CallNextHookEx(NULL as _, code, w_param, l_param);
         }
     }
 
     let ms = l_param as PMOUSEHOOKSTRUCT;
-    unsafe {
-
-       /*log::info!(
-            "Mouse Hook - pt: ({}, {}), hwnd: {:?}, wHitTestCode: {}, dwExtraInfo: {}",
-            (*ms).pt.x,
-            (*ms).pt.y,
-            (*ms).hwnd,
-            (*ms).wHitTestCode,
-            (*ms).dwExtraInfo
-        );*/
-		
-		unsafe {
-			if (*ms).wHitTestCode == 0 {
-				return 1;
-			}
+	unsafe {
+		if (*ms).wHitTestCode == 0 {
+			return 1;
 		}
+	}
 
-    }
     unsafe { CallNextHookEx(NULL as _, code, w_param, l_param) }
 }
 

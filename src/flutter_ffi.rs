@@ -1,6 +1,6 @@
 use crate::{
     client::file_trait::FileManager,
-    common::{is_keyboard_mode_supported, make_fd_to_json},
+    common::make_fd_to_json,
     flutter::{self, SESSIONS, session_add, session_add_existed, session_start_, sessions, try_sync_peer_option},
     input::*,
     ui_interface::{self, *},
@@ -15,10 +15,8 @@ use flutter_rust_bridge::{StreamSink, SyncReturn};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::allow_err;
 use hbb_common::{
-	allow_err,
     config::{self, LocalConfig, PeerConfig, PeerInfoSerde},
     fs, lazy_static, log,
-    message_proto::KeyboardMode,
     rendezvous_proto::ConnType,
     ResultType,
 };
@@ -46,6 +44,7 @@ fn initialize(app_dir: &str) {
     *config::APP_DIR.write().unwrap() = app_dir.to_owned();
     #[cfg(target_os = "android")]
     {
+        // flexi_logger can't work when android_logger initialized.
         #[cfg(debug_assertions)]
         android_logger::init_once(
             android_logger::Config::default()
@@ -84,7 +83,7 @@ pub fn stop_global_event_stream(app_type: String) {
 pub enum EventToUI {
     Event(String),
     Rgba(usize),
-    Texture(usize),
+    Texture(usize, bool), // (display, gpu_texture)
 }
 
 pub fn host_stop_system_key_propagate(_stopped: bool) {
@@ -203,10 +202,19 @@ pub fn session_login(
     }
 }
 
-pub fn session_send2fa(session_id: SessionID, code: String) {
+pub fn session_send2fa(session_id: SessionID, code: String, trust_this_device: bool) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        session.send2fa(code);
+        session.send2fa(code, trust_this_device);
     }
+}
+
+pub fn session_get_enable_trusted_devices(session_id: SessionID) -> SyncReturn<bool> {
+    let v = if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.get_enable_trusted_devices()
+    } else {
+        false
+    };
+    SyncReturn(v)
 }
 
 pub fn session_close(session_id: SessionID) {
@@ -433,15 +441,7 @@ pub fn session_get_custom_image_quality(session_id: SessionID) -> Option<Vec<i32
 
 pub fn session_is_keyboard_mode_supported(session_id: SessionID, mode: String) -> SyncReturn<bool> {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        if let Ok(mode) = KeyboardMode::from_str(&mode[..]) {
-            SyncReturn(is_keyboard_mode_supported(
-                &mode,
-                session.get_peer_version(),
-                &session.peer_platform(),
-            ))
-        } else {
-            SyncReturn(false)
-        }
+        SyncReturn(session.is_keyboard_mode_supported(mode))
     } else {
         SyncReturn(false)
     }
@@ -477,6 +477,25 @@ pub fn session_switch_display(is_desktop: bool, session_id: SessionID, value: Ve
 
 pub fn session_handle_flutter_key_event(
     session_id: SessionID,
+    character: String,
+    usb_hid: i32,
+    lock_modes: i32,
+    down_or_up: bool,
+) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        let keyboard_mode = session.get_keyboard_mode();
+        session.handle_flutter_key_event(
+            &keyboard_mode,
+            &character,
+            usb_hid,
+            lock_modes,
+            down_or_up,
+        );
+    }
+}
+
+pub fn session_handle_flutter_raw_key_event(
+    session_id: SessionID,
     name: String,
     platform_code: i32,
     position_code: i32,
@@ -485,7 +504,7 @@ pub fn session_handle_flutter_key_event(
 ) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         let keyboard_mode = session.get_keyboard_mode();
-        session.handle_flutter_key_event(
+        session.handle_flutter_raw_key_event(
             &keyboard_mode,
             &name,
             platform_code,
@@ -693,6 +712,18 @@ pub fn session_add_job(
 pub fn session_resume_job(session_id: SessionID, act_id: i32, is_remote: bool) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.resume_job(act_id, is_remote);
+    }
+}
+
+pub fn session_rename_file(
+    session_id: SessionID,
+    act_id: i32,
+    path: String,
+    new_name: String,
+    is_remote: bool,
+) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.rename_file(act_id, path, new_name, is_remote);
     }
 }
 
@@ -1319,6 +1350,29 @@ pub fn cm_close_voice_call(id: i32) {
     crate::ui_cm_interface::close_voice_call(id);
 }
 
+pub fn set_voice_call_input_device(_is_cm: bool, _device: String) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if _is_cm {
+        let _ = crate::ipc::set_config("voice-call-input", _device);
+    } else {
+        crate::audio_service::set_voice_call_input_device(Some(_device), true);
+    }
+}
+
+pub fn get_voice_call_input_device(_is_cm: bool) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if _is_cm {
+        match crate::ipc::get_config("voice-call-input") {
+            Ok(Some(device)) => device,
+            _ => "".to_owned(),
+        }
+    } else {
+        crate::audio_service::get_voice_call_input_device().unwrap_or_default()
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    "".to_owned()
+}
+
 pub fn main_get_last_remote_id() -> String {
     LocalConfig::get_remote_id()
 }
@@ -1545,6 +1599,7 @@ pub fn session_on_waiting_for_image_dialog_show(session_id: SessionID) {
 pub fn session_toggle_virtual_display(session_id: SessionID, index: i32, on: bool) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.toggle_virtual_display(index, on);
+        flutter::session_update_virtual_display(&session, index, on);
     }
 }
 
@@ -1592,6 +1647,14 @@ pub fn main_set_permanent_password(password: String) {
 
 pub fn main_check_super_user_permission() -> bool {
     check_super_user_permission()
+}
+
+pub fn main_get_unlock_pin() -> SyncReturn<String> {
+    SyncReturn(get_unlock_pin())
+}
+
+pub fn main_set_unlock_pin(pin: String) -> SyncReturn<String> {
+    SyncReturn(set_unlock_pin(pin))
 }
 
 pub fn main_check_mouse_time() {
@@ -2192,6 +2255,26 @@ pub fn main_has_valid_bot_sync() -> SyncReturn<bool> {
 
 pub fn main_get_hard_option(key: String) -> SyncReturn<String> {
     SyncReturn(get_hard_option(key))
+}
+
+pub fn main_get_buildin_option(key: String) -> SyncReturn<String> {
+    SyncReturn(get_builtin_option(&key))
+}
+
+pub fn main_check_hwcodec() {
+    check_hwcodec()
+}
+
+pub fn main_get_trusted_devices() -> String {
+    get_trusted_devices()
+}
+
+pub fn main_remove_trusted_devices(json: String) {
+    remove_trusted_devices(&json)
+}
+
+pub fn main_clear_trusted_devices() {
+    clear_trusted_devices()
 }
 
 pub fn session_request_new_display_init_msgs(session_id: SessionID, display: usize) {

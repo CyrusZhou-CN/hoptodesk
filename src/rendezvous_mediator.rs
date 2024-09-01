@@ -60,13 +60,20 @@ impl RendezvousMediator {
         tokio::spawn(async move {
             direct_server(server_cloned).await;
         });
+        #[cfg(target_os = "android")]
+        let start_lan_listening = true;
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if crate::platform::is_installed() {
+        let start_lan_listening = crate::platform::is_installed();
+        if start_lan_listening {
             std::thread::spawn(move || {
                 allow_err!(super::lan::start_listening());
             });
         }
-
+        // It is ok to run xdesktop manager when the headless function is not allowed.
+        #[cfg(target_os = "linux")]
+        if crate::is_server() {
+            crate::platform::linux_desktop_manager::start_xdesktop();
+        }
         loop {
             Config::reset_online();
             if Config::get_option("stop-service").is_empty() {
@@ -219,14 +226,15 @@ impl RendezvousMediator {
                                 log::error!("Invalid data received: {}", close_sessions.data);
                             }
                         } else if let Ok(connect_request) =
-                            serde_json::from_str::<rendezvous_messages::ConnectRequest>(&msg){
+							serde_json::from_str::<rendezvous_messages::ConnectRequest>(&msg){
                             last_data_received = chrono::Utc::now();
                             let listener =
                                 hbb_common::tcp::new_listener(SocketAddr::new(local_ip, 0), true)
                                 .await?;
+								
                                 let nat_type = Config::get_nat_type();
-
-                                let listening = rendezvous_messages::Listening::new(
+                                
+								let listening = rendezvous_messages::Listening::new(
                                     connect_request.sender_id,
                                     listener.local_addr().unwrap(),
                                     public_addr,
@@ -242,7 +250,7 @@ impl RendezvousMediator {
                                 Ok(_) => {
                                     let server_clone = server.clone();
                                     tokio::spawn(async move {
-                                        if let Err(error) = crate::accept(listener, server_clone, true, false).await {
+										if let Err(error) = crate::accept(listener, server_clone, true, false).await {
                                             log::error!("accept() failed: {:?}", error);
                                         }
                                         });
@@ -270,14 +278,14 @@ impl RendezvousMediator {
                                 CONNECT_TIMEOUT,
                             ).await
                             {
-                                match tokio::time::timeout_at(tokio::time::Instant::now() + Duration::from_secs(10), socket_packets.next()).await {
+								match tokio::time::timeout_at(tokio::time::Instant::now() + Duration::from_secs(10), socket_packets.next()).await {
                                     Ok(data) => {
                                         if let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(msg))) = data {
-                                            if let Ok(_) = serde_json::from_str::<rendezvous_messages::RelayReady,>(&msg){
-                                                let server_clone = server.clone();
+											if let Ok(_) = serde_json::from_str::<rendezvous_messages::RelayReady,>(&msg){
+												let server_clone = server.clone();
                                                 let addr = relay_connection.addr;
                                                 tokio::spawn(async move {
-                                                    let _ = crate::create_tcp_connection(
+													let _ = crate::create_tcp_connection(
                                                         server_clone,
                                                         stream,
                                                         addr,
