@@ -22,8 +22,6 @@ use crate::{
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use clipboard::ContextSend;
 use crossbeam_queue::ArrayQueue;
-//#[cfg(not(any(target_os = "android", target_os = "ios")))]
-//use hbb_common::sleep;
 #[cfg(not(target_os = "ios"))]
 use hbb_common::tokio::sync::mpsc::error::TryRecvError;
 use hbb_common::{
